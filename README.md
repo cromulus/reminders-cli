@@ -168,6 +168,8 @@ The server runs on `localhost:8080` by default. The first time you run it, you'l
 
 ### API Endpoints
 
+#### Reminders Management
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/lists` | List all reminder lists |
@@ -177,6 +179,18 @@ The server runs on `localhost:8080` by default. The first time you run it, you'l
 | DELETE | `/lists/:listName/reminders/:id` | Delete a reminder |
 | PATCH | `/lists/:listName/reminders/:id/complete` | Mark a reminder as complete |
 | PATCH | `/lists/:listName/reminders/:id/uncomplete` | Mark a reminder as incomplete |
+| GET | `/search` | Search for reminders with complex filtering |
+
+#### Webhooks
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/webhooks` | List all webhook configurations |
+| GET | `/webhooks/:id` | Get a specific webhook configuration |
+| POST | `/webhooks` | Create a new webhook |
+| PATCH | `/webhooks/:id` | Update a webhook configuration |
+| DELETE | `/webhooks/:id` | Delete a webhook configuration |
+| POST | `/webhooks/:id/test` | Test a webhook by sending a test event |
 
 ### Query Parameters
 
@@ -248,11 +262,190 @@ Request:
 # Get all incomplete reminders across all lists
 curl http://localhost:8080/reminders
 
-# Include completed reminders
+# Get all reminders, including completed ones
 curl "http://localhost:8080/reminders?completed=true"
 ```
 
+### Webhook Support
+
+The API server includes webhook support, which allows you to receive real-time notifications when reminders are created, updated, completed, uncompleted, or deleted. This is especially useful for integrating with external systems or building automation workflows.
+
+#### How Webhooks Work
+
+1. You register a webhook URL and specify filter criteria
+2. When reminders change, the API server checks if the changed reminder matches your filter criteria
+3. If it matches, the server sends a POST request to your webhook URL with details about the change
+
+#### Webhook Payload
+
+Webhooks deliver a JSON payload with the following structure:
+
+```json
+{
+  "event": "created",
+  "timestamp": "2025-03-11T15:30:45Z",
+  "reminder": {
+    "uuid": "x-apple-reminder://F3A0B3D8-E153-4AB9-B341-0C32A9AC6C2D",
+    "title": "Buy groceries",
+    "notes": "Milk, eggs, bread",
+    "dueDate": "2025-03-12T17:00:00Z",
+    "isCompleted": false,
+    "priority": 0,
+    "listName": "Shopping",
+    "listUUID": "5F6D3A2B-C8E7-4591-A03F-D83E2CB27591",
+    "creationDate": "2025-03-11T15:30:45Z",
+    "lastModifiedDate": "2025-03-11T15:30:45Z",
+    "completionDate": null
+  }
+}
+```
+
+The `event` field can be one of:
+- `created` - A new reminder was created
+- `updated` - An existing reminder was modified
+- `deleted` - A reminder was deleted
+- `completed` - A reminder was marked as complete
+- `uncompleted` - A reminder was marked as incomplete
+
+#### Webhook Filtering
+
+You can filter which reminders trigger webhooks using these criteria:
+- `listNames` - Only reminders from specific lists (by name)
+- `listUUIDs` - Only reminders from specific lists (by UUID)
+- `completed` - Filter by completion status (all/complete/incomplete)
+- `priorityLevels` - Only reminders with specific priority levels
+- `hasQuery` - Only reminders with title or notes containing specific text
+
+#### Creating a Webhook
+
+Request:
+```bash
+curl -X POST http://localhost:8080/webhooks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://your-webhook-endpoint.com/webhook",
+    "name": "High priority work reminders",
+    "filter": {
+      "listNames": ["Work"],
+      "priorityLevels": [1, 5, 9],
+      "completed": "incomplete"
+    }
+  }'
+```
+
 Response:
+```json
+{
+  "id": "6D3E8F2A-7B15-4C92-A5D8-1E9F4B7C3A6D",
+  "url": "https://your-webhook-endpoint.com/webhook",
+  "name": "High priority work reminders",
+  "isActive": true,
+  "filter": {
+    "listNames": ["Work"],
+    "priorityLevels": [1, 5, 9],
+    "completed": "incomplete",
+    "listUUIDs": null,
+    "hasQuery": null
+  }
+}
+```
+
+#### Testing a Webhook
+
+Request:
+```bash
+curl -X POST http://localhost:8080/webhooks/6D3E8F2A-7B15-4C92-A5D8-1E9F4B7C3A6D/test
+```
+
+Response:
+```json
+{
+  "success": true,
+  "message": "Test webhook sent successfully"
+}
+```
+
+#### Listing Webhooks
+
+Request:
+```bash
+curl http://localhost:8080/webhooks
+```
+
+Response:
+```json
+[
+  {
+    "id": "6D3E8F2A-7B15-4C92-A5D8-1E9F4B7C3A6D",
+    "url": "https://your-webhook-endpoint.com/webhook",
+    "name": "High priority work reminders",
+    "isActive": true,
+    "filter": {
+      "listNames": ["Work"],
+      "priorityLevels": [1, 5, 9],
+      "completed": "incomplete",
+      "listUUIDs": null,
+      "hasQuery": null
+    }
+  },
+  {
+    "id": "8F2C4A1E-9D3B-5F7G-H6J8-K9L0M1N2O3P4",
+    "url": "https://another-endpoint.com/hooks/reminders",
+    "name": "Shopping list changes",
+    "isActive": true,
+    "filter": {
+      "listNames": ["Shopping"],
+      "priorityLevels": null,
+      "completed": "all",
+      "listUUIDs": null,
+      "hasQuery": null
+    }
+  }
+]
+```
+
+#### Updating a Webhook
+
+Request:
+```bash
+curl -X PATCH http://localhost:8080/webhooks/6D3E8F2A-7B15-4C92-A5D8-1E9F4B7C3A6D \
+  -H "Content-Type: application/json" \
+  -d '{
+    "isActive": false,
+    "name": "High priority work reminders (paused)"
+  }'
+```
+
+Response:
+```json
+{
+  "id": "6D3E8F2A-7B15-4C92-A5D8-1E9F4B7C3A6D",
+  "url": "https://your-webhook-endpoint.com/webhook",
+  "name": "High priority work reminders (paused)",
+  "isActive": false,
+  "filter": {
+    "listNames": ["Work"],
+    "priorityLevels": [1, 5, 9],
+    "completed": "incomplete",
+    "listUUIDs": null,
+    "hasQuery": null
+  }
+}
+```
+
+#### Deleting a Webhook
+
+Request:
+```bash
+curl -X DELETE http://localhost:8080/webhooks/6D3E8F2A-7B15-4C92-A5D8-1E9F4B7C3A6D
+```
+
+Response:
+HTTP 204 No Content
+```
+
+#### GET /reminders Example Response
+
 ```json
 [
   {
