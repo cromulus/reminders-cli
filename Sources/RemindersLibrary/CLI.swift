@@ -10,9 +10,12 @@ private struct ShowLists: ParsableCommand {
         name: .shortAndLong,
         help: "format, either of 'plain' or 'json'")
     var format: OutputFormat = .plain
+        
+    @Flag(help: "Show list UUIDs in addition to names")
+    var showUUIDs = false
 
     func run() {
-        reminders.showLists(outputFormat: format)
+        reminders.showLists(outputFormat: format, showUUIDs: showUUIDs)
     }
 }
 
@@ -28,6 +31,9 @@ private struct ShowAll: ParsableCommand {
 
     @Flag(help: "When using --due-date, also include items due before the due date")
     var includeOverdue = false
+    
+    @Flag(help: "Show reminder UUIDs in the output")
+    var showUUIDs = false
 
     @Option(
         name: .shortAndLong,
@@ -56,7 +62,7 @@ private struct ShowAll: ParsableCommand {
 
         reminders.showAllReminders(
             dueOn: self.dueDate, includeOverdue: self.includeOverdue,
-            displayOptions: displayOptions, outputFormat: format)
+            displayOptions: displayOptions, outputFormat: format, showUUIDs: self.showUUIDs)
     }
 }
 
@@ -65,7 +71,7 @@ private struct Show: ParsableCommand {
         abstract: "Print the items on the given list")
 
     @Argument(
-        help: "The list to print items from, see 'show-lists' for names",
+        help: "The list to print items from, see 'show-lists' for names or UUIDs",
         completion: .custom(listNameCompletion))
     var listName: String
 
@@ -77,6 +83,9 @@ private struct Show: ParsableCommand {
 
     @Flag(help: "When using --due-date, also include items due before the due date")
     var includeOverdue = false
+    
+    @Flag(help: "Show reminder UUIDs in the output")
+    var showUUIDs = false
 
     @Option(
         name: .shortAndLong,
@@ -115,7 +124,8 @@ private struct Show: ParsableCommand {
 
         reminders.showListItems(
             withName: self.listName, dueOn: self.dueDate, includeOverdue: self.includeOverdue,
-            displayOptions: displayOptions, outputFormat: format, sort: sort, sortOrder: sortOrder)
+            displayOptions: displayOptions, outputFormat: format, sort: sort, sortOrder: sortOrder,
+            showUUIDs: self.showUUIDs)
     }
 }
 
@@ -124,7 +134,7 @@ private struct Add: ParsableCommand {
         abstract: "Add a reminder to a list")
 
     @Argument(
-        help: "The list to add to, see 'show-lists' for names",
+        help: "The list to add to, see 'show-lists' for names or UUIDs",
         completion: .custom(listNameCompletion))
     var listName: String
 
@@ -152,6 +162,9 @@ private struct Add: ParsableCommand {
         name: .shortAndLong,
         help: "The notes to add to the reminder")
     var notes: String?
+    
+    @Flag(help: "Show UUID of the created reminder")
+    var showUUID = false
 
     func run() {
         reminders.addReminder(
@@ -160,7 +173,8 @@ private struct Add: ParsableCommand {
             toListNamed: self.listName,
             dueDateComponents: self.dueDate,
             priority: priority,
-            outputFormat: format)
+            outputFormat: format,
+            showUUID: showUUID)
     }
 }
 
@@ -283,6 +297,101 @@ private struct NewList: ParsableCommand {
     }
 }
 
+private struct GetByUUID: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Get, complete, or delete a reminder directly by UUID")
+    
+    @Argument(
+        help: "The UUID of the reminder to access")
+    var uuid: String
+    
+    @Flag(name: .shortAndLong, help: "Show the reminder")
+    var show = false
+    
+    @Flag(name: .shortAndLong, help: "Complete the reminder")
+    var complete = false
+    
+    @Flag(name: .shortAndLong, help: "Uncomplete the reminder")
+    var uncomplete = false
+    
+    @Flag(name: .shortAndLong, help: "Delete the reminder")
+    var delete = false
+    
+    @Option(
+        name: .shortAndLong,
+        help: "format, either of 'plain' or 'json'")
+    var format: OutputFormat = .plain
+    
+    func validate() throws {
+        let actionCount = [show, complete, uncomplete, delete].filter { $0 }.count
+        if actionCount == 0 {
+            throw ValidationError("Must specify at least one action: --show, --complete, --uncomplete, or --delete")
+        }
+    }
+    
+    func run() throws {
+        guard let reminder = reminders.getReminderByUUID(uuid) else {
+            print("No reminder found with UUID \(uuid)")
+            throw ValidationError("No reminder found with UUID \(uuid)")
+        }
+        
+        if show {
+            switch format {
+            case .json:
+                print(encodeToJson(data: reminder))
+            case .plain:
+                print("UUID: \(reminder.calendarItemExternalIdentifier ?? "unknown")")
+                print("List: \(reminder.calendar.title) [\(reminder.calendar.calendarIdentifier)]")
+                print("Title: \(reminder.title ?? "<unknown>")")
+                if let notes = reminder.notes, !notes.isEmpty {
+                    print("Notes: \(notes)")
+                }
+                print("Completed: \(reminder.isCompleted ? "Yes" : "No")")
+                if let dueDate = reminder.dueDateComponents?.date {
+                    let formatter = DateFormatter()
+                    formatter.dateStyle = .medium
+                    formatter.timeStyle = .short
+                    print("Due: \(formatter.string(from: dueDate))")
+                }
+                if reminder.priority > 0 {
+                    let priority = Priority(reminder.mappedPriority)?.rawValue ?? "none"
+                    print("Priority: \(priority)")
+                }
+            }
+        }
+        
+        if complete {
+            do {
+                try reminders.setReminderComplete(reminder, complete: true)
+                print("Completed '\(reminder.title ?? "<unknown>")'")
+            } catch {
+                print("Failed to complete reminder: \(error.localizedDescription)")
+                throw ValidationError("Failed to complete reminder: \(error.localizedDescription)")
+            }
+        }
+        
+        if uncomplete {
+            do {
+                try reminders.setReminderComplete(reminder, complete: false)
+                print("Uncompleted '\(reminder.title ?? "<unknown>")'")
+            } catch {
+                print("Failed to uncomplete reminder: \(error.localizedDescription)")
+                throw ValidationError("Failed to uncomplete reminder: \(error.localizedDescription)")
+            }
+        }
+        
+        if delete {
+            do {
+                try reminders.deleteReminder(reminder)
+                print("Deleted '\(reminder.title ?? "<unknown>")'")
+            } catch {
+                print("Failed to delete reminder: \(error.localizedDescription)")
+                throw ValidationError("Failed to delete reminder: \(error.localizedDescription)")
+            }
+        }
+    }
+}
+
 public struct CLI: ParsableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "reminders",
@@ -297,6 +406,7 @@ public struct CLI: ParsableCommand {
             ShowLists.self,
             NewList.self,
             ShowAll.self,
+            GetByUUID.self,
         ]
     )
 

@@ -1,7 +1,29 @@
 import EventKit
 
+extension EKCalendar: @retroactive Encodable {
+    private enum CalendarEncodingKeys: String, CodingKey {
+        case title
+        case uuid
+        case allowsContentModifications
+        case type
+        case source
+        case isPrimary
+    }
+    
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CalendarEncodingKeys.self)
+        try container.encode(self.title, forKey: .title)
+        try container.encode(self.calendarIdentifier, forKey: .uuid)
+        try container.encode(self.allowsContentModifications, forKey: .allowsContentModifications)
+        try container.encode(self.type.rawValue, forKey: .type)
+        try container.encode(self.source.title, forKey: .source)
+        try container.encode(self.isImmutable ? false : true, forKey: .isPrimary)
+    }
+}
+
 extension EKReminder: @retroactive Encodable {
     private enum EncodingKeys: String, CodingKey {
+        case uuid
         case externalId
         case lastModified
         case creationDate
@@ -16,15 +38,20 @@ extension EKReminder: @retroactive Encodable {
         case startDate
         case dueDate
         case list
+        case listUUID
+        case calendarItemIdentifier
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: EncodingKeys.self)
         try container.encode(self.calendarItemExternalIdentifier, forKey: .externalId)
+        try container.encode(self.calendarItemExternalIdentifier, forKey: .uuid)
+        try container.encode(self.calendarItemIdentifier, forKey: .calendarItemIdentifier)
         try container.encode(self.title, forKey: .title)
         try container.encode(self.isCompleted, forKey: .isCompleted)
         try container.encode(self.priority, forKey: .priority)
         try container.encode(self.calendar.title, forKey: .list)
+        try container.encode(self.calendar.calendarIdentifier, forKey: .listUUID)
         try container.encodeIfPresent(self.notes, forKey: .notes)
         
         // url field is nil

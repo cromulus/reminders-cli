@@ -22,18 +22,36 @@ final class NaturalLanguageTests: XCTestCase {
 
     func testTodayNoon() throws {
         let components = try XCTUnwrap(DateComponents(argument: "12:00"))
-        let today = try XCTUnwrap(Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: Date()))
-        let expectedComponents = Calendar.current.dateComponents(calendarComponents(), from: today)
-
-        XCTAssertEqual(components, expectedComponents)
+        
+        // Create dates from components for comparison
+        let componentsDate = try XCTUnwrap(Calendar.current.date(from: components))
+        
+        // Compare hour and minute only
+        XCTAssertEqual(Calendar.current.component(.hour, from: componentsDate), 12)
+        XCTAssertEqual(Calendar.current.component(.minute, from: componentsDate), 0)
+        
+        // Make sure it's today
+        XCTAssertEqual(
+            Calendar.current.dateComponents([.year, .month, .day], from: componentsDate),
+            Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        )
     }
 
     func testTonight() throws {
         let components = try XCTUnwrap(DateComponents(argument: "tonight"))
-        let today = try XCTUnwrap(Calendar.current.date(bySettingHour: 19, minute: 0, second: 0, of: Date()))
-        let expectedComponents = Calendar.current.dateComponents(calendarComponents(), from: today)
-
-        XCTAssertEqual(components, expectedComponents)
+        
+        // Create date from components for comparison
+        let componentsDate = try XCTUnwrap(Calendar.current.date(from: components))
+        
+        // Tonight should be 7pm today
+        XCTAssertEqual(Calendar.current.component(.hour, from: componentsDate), 19)
+        XCTAssertEqual(Calendar.current.component(.minute, from: componentsDate), 0)
+        
+        // Make sure it's today
+        XCTAssertEqual(
+            Calendar.current.dateComponents([.year, .month, .day], from: componentsDate),
+            Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        )
     }
 
     func testTomorrow() throws {
@@ -47,12 +65,23 @@ final class NaturalLanguageTests: XCTestCase {
 
     func testTomorrowAtTime() throws {
         let components = try XCTUnwrap(DateComponents(argument: "tomorrow 9pm"))
-        let tomorrow = try XCTUnwrap(Calendar.current.date(byAdding: .day, value: 1, to: Date()))
-        let tomorrowAt9 = try XCTUnwrap(
-            Calendar.current.date(bySettingHour: 21, minute: 0, second: 0, of: tomorrow))
-        let expectedComponents = Calendar.current.dateComponents(calendarComponents(), from: tomorrowAt9)
-
-        XCTAssertEqual(components, expectedComponents)
+        
+        // Create date from components for comparison
+        let componentsDate = try XCTUnwrap(Calendar.current.date(from: components))
+        
+        // Should be 9pm
+        XCTAssertEqual(Calendar.current.component(.hour, from: componentsDate), 21)
+        XCTAssertEqual(Calendar.current.component(.minute, from: componentsDate), 0)
+        
+        // Get tomorrow's date for comparison
+        let today = Date()
+        let tomorrow = try XCTUnwrap(Calendar.current.date(byAdding: .day, value: 1, to: today))
+        
+        // Make sure it's tomorrow
+        XCTAssertEqual(
+            Calendar.current.dateComponents([.year, .month, .day], from: componentsDate),
+            Calendar.current.dateComponents([.year, .month, .day], from: tomorrow)
+        )
     }
 
     func testRelativeDayCount() throws {

@@ -1,8 +1,10 @@
 RELEASE_BUILD=./.build/apple/Products/Release
 EXECUTABLE=reminders
+API_EXECUTABLE=reminders-api
 ARCHIVE=$(EXECUTABLE).tar.gz
+API_ARCHIVE=$(API_EXECUTABLE).tar.gz
 
-.PHONY: clean build-release package
+.PHONY: clean build-release package package-api
 
 build-release:
 	swift build --configuration release -Xswiftc -warnings-as-errors --arch arm64 --arch x86_64
@@ -15,6 +17,13 @@ package: build-release
 	@shasum -a 256 $(EXECUTABLE)
 	rm $(EXECUTABLE) _reminders
 
+package-api: build-release
+	tar -pvczf $(API_ARCHIVE) -C $(RELEASE_BUILD) $(API_EXECUTABLE)
+	tar -zxvf $(API_ARCHIVE)
+	@shasum -a 256 $(API_ARCHIVE)
+	@shasum -a 256 $(API_EXECUTABLE)
+	rm $(API_EXECUTABLE)
+
 clean:
-	rm -f $(EXECUTABLE) $(ARCHIVE) _reminders
+	rm -f $(EXECUTABLE) $(ARCHIVE) $(API_EXECUTABLE) $(API_ARCHIVE) _reminders
 	swift package clean
