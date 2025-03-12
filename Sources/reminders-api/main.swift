@@ -4,33 +4,84 @@ import HummingbirdFoundation
 import RemindersLibrary
 import Foundation
 import EventKit
+import ArgumentParser
 
-// Response struct for webhook test results
+// MARK: - Configuration
+
+struct Configuration: ParsableCommand {
+    static var configuration = CommandConfiguration(
+        commandName: "reminders-api",
+        abstract: "Run a REST API server for macOS Reminders",
+        discussion: "Provides HTTP API access to your macOS Reminders data."
+    )
+    
+    @Option(name: [.customLong("host")], help: "The hostname to bind to")
+    var hostname: String = "127.0.0.1"
+    
+    @Option(name: [.customShort("p"), .customLong("port")], help: "The port to listen on")
+    var port: Int = 8080
+    
+    @Option(name: [.customLong("token")], help: "API authentication token (overrides REMINDERS_API_TOKEN environment variable)")
+    var token: String?
+    
+    @Flag(name: [.customLong("auth-required")], help: "Require authentication for all API endpoints")
+    var requireAuth = false
+    
+    @Flag(name: [.customLong("generate-token")], help: "Generate a new API token and exit")
+    var generateToken = false
+    
+    func run() throws {
+        // Handle token generation mode
+        if generateToken {
+            let authManager = AuthManager()
+            let token = authManager.generateToken()
+            print("Generated API token: \(token)")
+            print("Use this token as the REMINDERS_API_TOKEN environment variable or --token option")
+            print("Example: REMINDERS_API_TOKEN=\(token) reminders-api")
+            print("Example: reminders-api --token \(token)")
+            exit(0)
+        }
+        
+        // Set up the API token, with precedence:
+        // 1. Command line argument
+        // 2. Environment variable
+        let apiToken = token ?? ProcessInfo.processInfo.environment["REMINDERS_API_TOKEN"]
+        
+        // Check if reminders access is granted before starting server
+        switch Reminders.requestAccess() {
+        case (true, _):
+            print("Reminders access granted. Starting API server...")
+            startServer(hostname: hostname, port: port, token: apiToken, requireAuth: requireAuth)
+        case (false, let error):
+            print("Error: You need to grant reminders access to use the API server")
+            if let error {
+                print("Error: \(error.localizedDescription)")
+            }
+            exit(1)
+        }
+    }
+}
+
+// Response structs for API responses
 struct WebhookTestResponse: Codable {
     let success: Bool
     let message: String
 }
 
-// Check if reminders access is granted before starting server
-switch Reminders.requestAccess() {
-case (true, _):
-    print("Reminders access granted. Starting API server...")
-    startServer()
-case (false, let error):
-    print("Error: You need to grant reminders access to use the API server")
-    if let error {
-        print("Error: \(error.localizedDescription)")
-    }
-    exit(1)
-}
-
-func startServer() {
+// Initialize and start the server
+func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool) {
     let remindersService = Reminders()
     let webhookManager = WebhookManager(remindersService: remindersService)
+    let authManager = AuthManager(token: token, requireAuth: requireAuth)
+    
+    // Create application with the provided hostname and port
     let app = HBApplication(configuration: .init(
-        address: .hostname("127.0.0.1", port: 8080),
+        address: .hostname(hostname, port: port),
         serverName: "RemindersAPI"
     ))
+    
+    // Set auth required status on the application
+    app.authRequired = authManager.isAuthRequired
     
     // Middleware for JSON response encoding
     let jsonEncoder = JSONEncoder()
@@ -41,12 +92,61 @@ func startServer() {
     app.middleware.add(
         HBCORSMiddleware(
             allowOrigin: .all,
-            allowHeaders: ["Content-Type"],
+            allowHeaders: ["Content-Type", "Authorization"],
             allowMethods: [.GET, .POST, .PUT, .DELETE, .PATCH]
         )
     )
     
-    // Routes
+    // Add token authentication middleware
+    app.middleware.add(TokenAuthMiddleware(authManager: authManager))
+    
+    // Define middleware to check authentication for all routes
+    struct AuthCheckMiddleware: HBMiddleware {
+        func apply(to request: HBRequest, next: HBResponder) -> EventLoopFuture<HBResponse> {
+            // Check if global auth is required
+            let requireAuth = request.application.requireAuth
+            if requireAuth && !request.isAuthenticated {
+                return request.failure(.unauthorized, message: "Authentication required")
+            }
+            
+            return next.respond(to: request)
+        }
+    }
+    
+    // Add auth check middleware
+    app.middleware.add(AuthCheckMiddleware())
+    
+    // MARK: - Authentication Settings Routes
+    
+    // POST /auth/settings - Configure authentication settings
+    app.router.post("auth/settings") { request -> HBResponse in
+        // Always require authentication for settings management
+        if !request.isAuthenticated {
+            throw HBHTTPError(.unauthorized, message: "Authentication required")
+        }
+        
+        struct AuthSettingsRequest: Decodable {
+            let requireAuth: Bool
+        }
+        
+        let settings = try request.decode(as: AuthSettingsRequest.self)
+        
+        // Update global auth requirement
+        app.authRequired = settings.requireAuth
+        authManager.setAuthRequired(settings.requireAuth)
+        
+        // Return confirmation
+        let message = "Authentication settings updated. Required: \(settings.requireAuth)"
+        let responseData = try JSONEncoder().encode(["message": message])
+        
+        return HBResponse(
+            status: .ok,
+            headers: ["content-type": "application/json"],
+            body: .byteBuffer(ByteBuffer(data: responseData))
+        )
+    }
+    
+    // MARK: - Resource Routes
     
     // GET /lists - Get all reminder lists
     app.router.get("lists") { request -> HBResponse in
@@ -83,6 +183,7 @@ func startServer() {
     
     // POST /lists/:name/reminders - Add a new reminder to a list
     app.router.post("lists/:name/reminders") { request -> HBResponse in
+        
         guard let listName = request.parameters.get("name") else {
             throw HBHTTPError(.badRequest, message: "Missing list name")
         }
@@ -286,26 +387,6 @@ func startServer() {
     
     // GET /search - Search for reminders with complex filtering
     app.router.get("search") { request -> HBResponse in
-        // Define search parameters
-        struct SearchParameters {
-            var listNames: [String]?
-            var listUUIDs: [String]?
-            var query: String?
-            var completed: DisplayOptions
-            var dueBefore: Date?
-            var dueAfter: Date?
-            var modifiedAfter: Date?
-            var createdAfter: Date?
-            var hasNotes: Bool?
-            var hasDueDate: Bool?
-            var priority: Priority?
-            var priorityMin: Int?
-            var priorityMax: Int?
-            var sortBy: String?
-            var sortOrder: String?
-            var limit: Int?
-        }
-        
         // Parse query parameters
         let searchParams = parseSearchParameters(request)
         
@@ -535,19 +616,21 @@ func startServer() {
             request.httpBody = payloadData
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             
-            // Send the test request
+            // Send the test request synchronously
             var testSuccess = false
-            let semaphore = DispatchSemaphore(value: 0)
+            let group = DispatchGroup()
+            group.enter()
             
             let task = URLSession.shared.dataTask(with: request) { _, response, error in
                 if let httpResponse = response as? HTTPURLResponse {
                     testSuccess = (200...299).contains(httpResponse.statusCode)
                 }
-                semaphore.signal()
+                group.leave()
             }
             task.resume()
             
-            semaphore.wait()
+            // Wait with timeout (5 seconds)
+            _ = group.wait(timeout: .now() + 5)
             
             // Use the WebhookTestResponse struct defined at the top of the file
             
@@ -585,8 +668,17 @@ func startServer() {
         }
     }
     
-    // Server startup
-    print("RemindersAPI server starting on http://localhost:8080 with webhook support")
+    // Authentication is handled by AuthCheckMiddleware
+    
+    // Print server information
+    let tokenStatus = token != nil ? "configured" : "not configured"
+    let authStatus = requireAuth ? "required" : "optional"
+    
+    print("RemindersAPI server starting on http://\(hostname):\(port) with webhook support")
+    print("API token: \(tokenStatus)")
+    print("Authentication: \(authStatus)")
+    print("Set API token using --token option or REMINDERS_API_TOKEN environment variable")
+    print("Generate a new token with: reminders-api --generate-token")
     
     // Run the application
     try! app.start()
@@ -1104,3 +1196,6 @@ func priorityFromRawValue(_ value: Int) -> Priority? {
     }
     return nil
 }
+
+// Run the Configuration command defined above
+Configuration.main()

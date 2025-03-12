@@ -322,20 +322,23 @@ public class WebhookManager {
     
     // This is called when EventKit notifies us of changes
     @objc private func reminderStoreChanged(_ notification: Notification) {
-        // Use a dispatch semaphore to ensure synchronous execution
-        let semaphore = DispatchSemaphore(value: 0)
+        // Use a dispatch group to ensure synchronous execution
+        let group = DispatchGroup()
+        group.enter()
         
         // Fetch all reminders to check for changes
         remindersService.reminders(on: remindersService.getCalendars(), displayOptions: .all) { reminders in
             self.processChangedReminders(reminders: reminders)
-            semaphore.signal()
+            group.leave()
         }
         
-        semaphore.wait()
+        // Wait with timeout (5 seconds)
+        _ = group.wait(timeout: .now() + 5)
     }
     
     private func updatePreviousRemindersState() {
-        let semaphore = DispatchSemaphore(value: 0)
+        let group = DispatchGroup()
+        group.enter()
         
         remindersService.reminders(on: remindersService.getCalendars(), displayOptions: .all) { reminders in
             // Reset the previous state
@@ -348,10 +351,11 @@ public class WebhookManager {
                 }
             }
             
-            semaphore.signal()
+            group.leave()
         }
         
-        semaphore.wait()
+        // Wait with timeout (5 seconds)
+        _ = group.wait(timeout: .now() + 5)
     }
     
     private func processChangedReminders(reminders: [EKReminder]) {

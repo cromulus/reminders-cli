@@ -166,6 +166,53 @@ $ ./reminders-api
 
 The server runs on `localhost:8080` by default. The first time you run it, you'll need to grant permission to access your reminders, just like with the CLI.
 
+### Authentication
+
+The API server supports token-based authentication, which is optional by default but can be required for all endpoints.
+
+#### Setting up authentication
+
+1. Generate a token:
+   ```bash
+   $ reminders-api --generate-token
+   Generated API token: abc123def456...
+   Use this token as the REMINDERS_API_TOKEN environment variable or --token option
+   Example: REMINDERS_API_TOKEN=abc123def456... reminders-api
+   Example: reminders-api --token abc123def456...
+   ```
+
+2. Start the server with the token:
+   ```bash
+   # Using environment variable:
+   $ REMINDERS_API_TOKEN=abc123def456... reminders-api
+   
+   # Or using command line argument:
+   $ reminders-api --token abc123def456...
+   
+   # To require authentication for all endpoints:
+   $ reminders-api --token abc123def456... --auth-required
+   ```
+
+3. Authenticate requests using the Bearer token:
+   ```bash
+   $ curl -H "Authorization: Bearer abc123def456..." http://localhost:8080/lists
+   ```
+
+#### Server command-line options
+
+```bash
+$ reminders-api --help
+USAGE: reminders-api [--host <host>] [--port <port>] [--token <token>] [--auth-required] [--generate-token]
+
+OPTIONS:
+  --host <host>           The hostname to bind to (default: 127.0.0.1)
+  -p, --port <port>       The port to listen on (default: 8080)
+  --token <token>         API authentication token (overrides REMINDERS_API_TOKEN environment variable)
+  --auth-required         Require authentication for all API endpoints
+  --generate-token        Generate a new API token and exit
+  -h, --help              Show help information.
+```
+
 ### API Endpoints
 
 #### Reminders Management
