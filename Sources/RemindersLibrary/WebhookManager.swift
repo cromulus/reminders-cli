@@ -1,20 +1,44 @@
 import Foundation
 import EventKit
+import Hummingbird
 
 // WebhookFilter defines criteria for filtering reminders that trigger webhooks
 public struct WebhookFilter: Codable {
     public var listNames: [String]?
     public var listUUIDs: [String]?
-    public var completed: DisplayOptions?
+    public var completed: String?
     public var priorityLevels: [Int]?
     public var hasQuery: String?
+    
+    // For matching, we convert the string to DisplayOptions
+    private var completedOption: DisplayOptions? {
+        guard let completed = completed else { return nil }
+        
+        switch completed.lowercased() {
+        case "all": return .all
+        case "complete", "completed": return .complete
+        case "incomplete": return .incomplete
+        default: return nil
+        }
+    }
     
     public init(listNames: [String]? = nil, listUUIDs: [String]? = nil, 
                 completed: DisplayOptions? = nil, priorityLevels: [Int]? = nil, 
                 hasQuery: String? = nil) {
         self.listNames = listNames
         self.listUUIDs = listUUIDs
-        self.completed = completed
+        
+        // Convert DisplayOptions to String
+        if let completed = completed {
+            switch completed {
+            case .all: self.completed = "all"
+            case .complete: self.completed = "complete"
+            case .incomplete: self.completed = "incomplete"
+            }
+        } else {
+            self.completed = nil
+        }
+        
         self.priorityLevels = priorityLevels
         self.hasQuery = hasQuery
     }
@@ -35,8 +59,8 @@ public struct WebhookFilter: Codable {
         }
         
         // Match completion status
-        if let completed = self.completed {
-            if !remindersService.shouldDisplay(reminder: reminder, displayOptions: completed) {
+        if let completedOption = self.completedOption {
+            if !remindersService.shouldDisplay(reminder: reminder, displayOptions: completedOption) {
                 return false
             }
         }
@@ -66,6 +90,11 @@ public struct WebhookFilter: Codable {
     }
 }
 
+// Import Hummingbird to conform to HBResponseGenerator
+#if canImport(Hummingbird)
+import Hummingbird
+#endif
+
 // WebhookConfig represents a single webhook configuration
 public struct WebhookConfig: Codable {
     public let id: UUID
@@ -80,6 +109,18 @@ public struct WebhookConfig: Codable {
         self.filter = filter
         self.isActive = isActive
         self.name = name
+    }
+}
+
+// Extend WebhookConfig to conform to HBResponseGenerator
+extension WebhookConfig: HBResponseGenerator {
+    public func response(from request: HBRequest) throws -> HBResponse {
+        let data = try JSONEncoder().encode(self)
+        return HBResponse(
+            status: .ok,
+            headers: ["content-type": "application/json"],
+            body: .byteBuffer(ByteBuffer(data: data))
+        )
     }
 }
 
@@ -221,10 +262,25 @@ public class WebhookManager {
             config.name = name
         }
         
-        if let filter = filter || let url = url {
+        // If we have new filter or URL, create a new config
+        if let filter = filter, let url = url {
             webhooks[index] = WebhookConfig(
-                url: url ?? config.url,
-                filter: filter ?? config.filter,
+                url: url,
+                filter: filter,
+                name: name ?? config.name,
+                isActive: isActive ?? config.isActive
+            )
+        } else if let filter = filter {
+            webhooks[index] = WebhookConfig(
+                url: config.url,
+                filter: filter,
+                name: name ?? config.name,
+                isActive: isActive ?? config.isActive
+            )
+        } else if let url = url {
+            webhooks[index] = WebhookConfig(
+                url: url,
+                filter: config.filter,
                 name: name ?? config.name,
                 isActive: isActive ?? config.isActive
             )
@@ -281,8 +337,9 @@ public class WebhookManager {
             
             // Store all current reminders by UUID for future reference
             for reminder in reminders {
-                let uuid = reminder.calendarItemExternalIdentifier
-                self.previousReminders[uuid] = reminder
+                if let uuid = reminder.calendarItemExternalIdentifier {
+                    self.previousReminders[uuid] = reminder
+                }
             }
             
             semaphore.signal()
@@ -295,8 +352,9 @@ public class WebhookManager {
         // Current reminders mapped by UUID
         var currentReminders: [String: EKReminder] = [:]
         for reminder in reminders {
-            let uuid = reminder.calendarItemExternalIdentifier
-            currentReminders[uuid] = reminder
+            if let uuid = reminder.calendarItemExternalIdentifier {
+                currentReminders[uuid] = reminder
+            }
         }
         
         // Detect created, updated, deleted, completed, and uncompleted reminders

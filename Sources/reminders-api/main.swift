@@ -5,6 +5,12 @@ import RemindersLibrary
 import Foundation
 import EventKit
 
+// Response struct for webhook test results
+struct WebhookTestResponse: Codable {
+    let success: Bool
+    let message: String
+}
+
 // Check if reminders access is granted before starting server
 switch Reminders.requestAccess() {
 case (true, _):
@@ -543,24 +549,38 @@ func startServer() {
             
             semaphore.wait()
             
+            // Use the WebhookTestResponse struct defined at the top of the file
+            
             if testSuccess {
+                let response = WebhookTestResponse(
+                    success: true,
+                    message: "Test webhook sent successfully"
+                )
                 return HBResponse(
                     status: .ok,
                     headers: ["content-type": "application/json"], 
-                    body: .byteBuffer(ByteBuffer(data: try JSONEncoder().encode(["success": true, "message": "Test webhook sent successfully"])))
+                    body: .byteBuffer(ByteBuffer(data: try JSONEncoder().encode(response)))
                 )
             } else {
+                let response = WebhookTestResponse(
+                    success: false,
+                    message: "Test webhook failed to deliver"
+                )
                 return HBResponse(
                     status: .internalServerError,
                     headers: ["content-type": "application/json"], 
-                    body: .byteBuffer(ByteBuffer(data: try JSONEncoder().encode(["success": false, "message": "Test webhook failed to deliver"])))
+                    body: .byteBuffer(ByteBuffer(data: try JSONEncoder().encode(response)))
                 )
             }
         } else {
+            let response = WebhookTestResponse(
+                success: false,
+                message: "No matching reminders found to test webhook with"
+            )
             return HBResponse(
                 status: .notFound,
                 headers: ["content-type": "application/json"], 
-                body: .byteBuffer(ByteBuffer(data: try JSONEncoder().encode(["success": false, "message": "No matching reminders found to test webhook with"])))
+                body: .byteBuffer(ByteBuffer(data: try JSONEncoder().encode(response)))
             )
         }
     }

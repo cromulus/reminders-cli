@@ -1,4 +1,4 @@
-// swift-tools-version:5.5
+// swift-tools-version:5.9
 import PackageDescription
 
 let package = Package(
@@ -12,7 +12,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", .upToNextMinor(from: "1.3.1")),
-        .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "1.8.0"),
+        .package(url: "https://github.com/hummingbird-project/hummingbird.git", .upToNextMinor(from: "1.8.2")),
     ],
     targets: [
         .executableTarget(
@@ -31,6 +31,7 @@ let package = Package(
             name: "RemindersLibrary",
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "Hummingbird", package: "hummingbird"),
             ]
         ),
         .testTarget(

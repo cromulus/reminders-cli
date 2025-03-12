@@ -4,10 +4,20 @@ API_EXECUTABLE=reminders-api
 ARCHIVE=$(EXECUTABLE).tar.gz
 API_ARCHIVE=$(API_EXECUTABLE).tar.gz
 
-.PHONY: clean build-release package package-api
+.PHONY: clean build-release package package-api test test-single
 
 build-release:
-	swift build --configuration release -Xswiftc -warnings-as-errors --arch arm64 --arch x86_64
+	swift build --configuration release -Xswiftc -warnings-as-errors -Xswiftc -enable-upcoming-feature -Xswiftc DisableSwift6Isolation --arch arm64 --arch x86_64
+
+test:
+	swift test
+
+test-single:
+	@if [ -z "$(TEST)" ]; then \
+		echo "Usage: make test-single TEST=\"TestClassName/testMethodName\""; \
+	else \
+		swift test --filter "$(TEST)"; \
+	fi
 
 package: build-release
 	$(RELEASE_BUILD)/$(EXECUTABLE) --generate-completion-script zsh > _reminders
