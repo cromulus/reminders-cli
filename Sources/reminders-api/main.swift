@@ -39,7 +39,7 @@ struct Configuration: ParsableCommand {
             print("Use this token as the REMINDERS_API_TOKEN environment variable or --token option")
             print("Example: REMINDERS_API_TOKEN=\(token) reminders-api")
             print("Example: reminders-api --token \(token)")
-            exit(0)
+            Foundation.exit(0)
         }
         
         // Set up the API token, with precedence:
@@ -57,7 +57,7 @@ struct Configuration: ParsableCommand {
             if let error {
                 print("Error: \(error.localizedDescription)")
             }
-            exit(1)
+            Foundation.exit(1)
         }
     }
 }
