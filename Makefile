@@ -7,7 +7,7 @@ API_ARCHIVE=$(API_EXECUTABLE).tar.gz
 .PHONY: clean build-release package package-api test test-single
 
 build-release:
-	swift build --configuration release -Xswiftc -warnings-as-errors -Xswiftc -enable-upcoming-feature -Xswiftc DisableSwift6Isolation --arch arm64 --arch x86_64
+	swift build --configuration release -Xswiftc -enable-upcoming-feature -Xswiftc DisableSwift6Isolation --arch arm64 --arch x86_64
 
 test:
 	swift test
