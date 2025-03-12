@@ -470,7 +470,15 @@ public final class Reminders {
         } 
         
         // If not numeric, check if it's a UUID
-        // Try with calendarItemExternalIdentifier (the one that starts with x-apple-reminder://)
+        let prefix = "x-apple-reminder://"
+        let fullUUID = indexOrUUID.hasPrefix(prefix) ? indexOrUUID : "\(prefix)\(indexOrUUID)"
+        
+        // Try with calendarItemExternalIdentifier
+        if let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == fullUUID }) {
+            return reminder
+        }
+        
+        // For backward compatibility, try with the original string too
         if let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == indexOrUUID }) {
             return reminder
         }
@@ -481,8 +489,17 @@ public final class Reminders {
     
     // Function to get a reminder by UUID directly from the store
     public func getReminderByUUID(_ uuid: String) -> EKReminder? {
+        // Handle both formats (with and without the protocol prefix)
+        let prefix = "x-apple-reminder://"
+        let fullUUID = uuid.hasPrefix(prefix) ? uuid : "\(prefix)\(uuid)"
+        
         // Try to get it directly if we can
-        if let reminder = store.calendarItem(withIdentifier: uuid) as? EKReminder {
+        if let reminder = self.store.calendarItem(withIdentifier: fullUUID) as? EKReminder {
+            return reminder
+        }
+        
+        // For backward compatibility, try with the original string too
+        if let reminder = self.store.calendarItem(withIdentifier: uuid) as? EKReminder {
             return reminder
         }
         
@@ -490,7 +507,7 @@ public final class Reminders {
         var foundReminder: EKReminder? = nil
         let semaphore = DispatchSemaphore(value: 0)
         
-        reminders(on: getCalendars(), displayOptions: .all) { reminders in
+        self.reminders(on: self.getCalendars(), displayOptions: .all) { reminders in
             foundReminder = reminders.first(where: { 
                 $0.calendarItemExternalIdentifier == uuid || $0.calendarItemIdentifier == uuid
             })

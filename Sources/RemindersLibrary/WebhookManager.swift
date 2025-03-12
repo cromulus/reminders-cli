@@ -180,8 +180,14 @@ public struct WebhookPayload: Codable {
             completionDate = formatter.string(from: date)
         }
         
+        // Strip the protocol prefix from UUIDs for API use
+        let uuid = reminder.calendarItemExternalIdentifier.replacingOccurrences(
+            of: "x-apple-reminder://", 
+            with: ""
+        )
+        
         self.reminder = ReminderData(
-            uuid: reminder.calendarItemExternalIdentifier,
+            uuid: uuid,
             title: reminder.title ?? "<unknown>",
             notes: reminder.notes,
             dueDate: dueDate,

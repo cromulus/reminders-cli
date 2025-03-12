@@ -641,18 +641,34 @@ func deleteReminder(id: String, listName: String, remindersService: Reminders) a
     return try await withCheckedThrowingContinuation { continuation in
         let calendar = remindersService.calendar(withName: listName)
         
+        // Handle both formats (with and without the protocol prefix)
+        let prefix = "x-apple-reminder://"
+        let fullId = id.hasPrefix(prefix) ? id : "\(prefix)\(id)"
+        
         remindersService.reminders(on: [calendar], displayOptions: .all) { reminders in
-            guard let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == id }) else {
-                continuation.resume(throwing: HBHTTPError(.notFound, message: "Reminder not found"))
+            // Try with the fully qualified ID first
+            if let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == fullId }) {
+                do {
+                    try remindersService.deleteReminder(reminder)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: HBHTTPError(.internalServerError, message: error.localizedDescription))
+                }
                 return
             }
             
-            do {
-                try remindersService.deleteReminder(reminder)
-                continuation.resume()
-            } catch {
-                continuation.resume(throwing: HBHTTPError(.internalServerError, message: error.localizedDescription))
+            // For backward compatibility, try with the original ID string
+            if let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == id }) {
+                do {
+                    try remindersService.deleteReminder(reminder)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: HBHTTPError(.internalServerError, message: error.localizedDescription))
+                }
+                return
             }
+            
+            continuation.resume(throwing: HBHTTPError(.notFound, message: "Reminder not found"))
         }
     }
 }
@@ -662,18 +678,34 @@ func setReminderComplete(id: String, listName: String, complete: Bool, reminders
     return try await withCheckedThrowingContinuation { continuation in
         let calendar = remindersService.calendar(withName: listName)
         
+        // Handle both formats (with and without the protocol prefix)
+        let prefix = "x-apple-reminder://"
+        let fullId = id.hasPrefix(prefix) ? id : "\(prefix)\(id)"
+        
         remindersService.reminders(on: [calendar], displayOptions: .all) { reminders in
-            guard let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == id }) else {
-                continuation.resume(throwing: HBHTTPError(.notFound, message: "Reminder not found"))
+            // Try with the fully qualified ID first
+            if let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == fullId }) {
+                do {
+                    try remindersService.setReminderComplete(reminder, complete: complete)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: HBHTTPError(.internalServerError, message: error.localizedDescription))
+                }
                 return
             }
             
-            do {
-                try remindersService.setReminderComplete(reminder, complete: complete)
-                continuation.resume()
-            } catch {
-                continuation.resume(throwing: HBHTTPError(.internalServerError, message: error.localizedDescription))
+            // For backward compatibility, try with the original ID string
+            if let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == id }) {
+                do {
+                    try remindersService.setReminderComplete(reminder, complete: complete)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: HBHTTPError(.internalServerError, message: error.localizedDescription))
+                }
+                return
             }
+            
+            continuation.resume(throwing: HBHTTPError(.notFound, message: "Reminder not found"))
         }
     }
 }

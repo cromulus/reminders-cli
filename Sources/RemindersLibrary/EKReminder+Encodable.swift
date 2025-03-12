@@ -44,8 +44,15 @@ extension EKReminder: @retroactive Encodable {
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: EncodingKeys.self)
-        try container.encode(self.calendarItemExternalIdentifier, forKey: .externalId)
-        try container.encode(self.calendarItemExternalIdentifier, forKey: .uuid)
+        
+        // Strip the protocol prefix from UUIDs for the API
+        let externalId = self.calendarItemExternalIdentifier.replacingOccurrences(
+            of: "x-apple-reminder://", 
+            with: ""
+        )
+        
+        try container.encode(externalId, forKey: .externalId)
+        try container.encode(externalId, forKey: .uuid)
         try container.encode(self.calendarItemIdentifier, forKey: .calendarItemIdentifier)
         try container.encode(self.title, forKey: .title)
         try container.encode(self.isCompleted, forKey: .isCompleted)

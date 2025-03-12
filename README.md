@@ -26,8 +26,8 @@ $ reminders show Soon
 
 # Show reminders with UUIDs
 $ reminders show Soon --show-u-u-i-ds
-0 Write README [UUID: x-apple-reminder://F3A0B3D8-E153-4AB9-B341-0C32A9AC6C2D]
-1 Ship reminders-cli [UUID: x-apple-reminder://18F92A5D-7D64-45A8-BC2F-6D1B3217A251]
+0 Write README [UUID: F3A0B3D8-E153-4AB9-B341-0C32A9AC6C2D]
+1 Ship reminders-cli [UUID: 18F92A5D-7D64-45A8-BC2F-6D1B3217A251]
 
 # You can also use the list UUID instead of name
 $ reminders show 5F6D3A2B-C8E7-4591-A03F-D83E2CB27591
@@ -44,7 +44,7 @@ $ reminders show Soon
 0 Ship reminders-cli
 
 # You can also use UUID instead of index
-$ reminders complete Soon x-apple-reminder://18F92A5D-7D64-45A8-BC2F-6D1B3217A251
+$ reminders complete Soon 18F92A5D-7D64-45A8-BC2F-6D1B3217A251
 Completed 'Ship reminders-cli'
 ```
 
@@ -233,7 +233,7 @@ Response:
   {
     "creationDate": "2025-03-10T14:30:00Z",
     "dueDate": "2025-03-15T09:00:00Z",
-    "id": "x-apple-reminder://F3A0B3D8-E153-4AB9-B341-0C32A9AC6C2D",
+    "id": "F3A0B3D8-E153-4AB9-B341-0C32A9AC6C2D",
     "isCompleted": false,
     "lastModifiedDate": "2025-03-10T14:30:00Z",
     "listName": "Soon",
@@ -244,7 +244,7 @@ Response:
   {
     "creationDate": "2025-03-09T10:15:00Z",
     "dueDate": "2025-03-12T17:00:00Z",
-    "id": "x-apple-reminder://18F92A5D-7D64-45A8-BC2F-6D1B3217A251",
+    "id": "18F92A5D-7D64-45A8-BC2F-6D1B3217A251",
     "isCompleted": false,
     "lastModifiedDate": "2025-03-09T10:15:00Z",
     "listName": "Soon",
@@ -285,7 +285,7 @@ Webhooks deliver a JSON payload with the following structure:
   "event": "created",
   "timestamp": "2025-03-11T15:30:45Z",
   "reminder": {
-    "uuid": "x-apple-reminder://F3A0B3D8-E153-4AB9-B341-0C32A9AC6C2D",
+    "uuid": "F3A0B3D8-E153-4AB9-B341-0C32A9AC6C2D",
     "title": "Buy groceries",
     "notes": "Milk, eggs, bread",
     "dueDate": "2025-03-12T17:00:00Z",
@@ -451,7 +451,7 @@ HTTP 204 No Content
   {
     "creationDate": "2025-03-10T14:30:00Z",
     "dueDate": "2025-03-15T09:00:00Z",
-    "id": "x-apple-reminder://F3A0B3D8-E153-4AB9-B341-0C32A9AC6C2D",
+    "id": "F3A0B3D8-E153-4AB9-B341-0C32A9AC6C2D",
     "isCompleted": false,
     "lastModifiedDate": "2025-03-10T14:30:00Z",
     "listName": "Soon",
@@ -462,7 +462,7 @@ HTTP 204 No Content
   {
     "creationDate": "2025-03-08T11:20:00Z",
     "dueDate": "2025-03-11T13:00:00Z",
-    "id": "x-apple-reminder://C4D92F3E-8A7B-4C97-B6F1-2E5D9F87A3E1",
+    "id": "C4D92F3E-8A7B-4C97-B6F1-2E5D9F87A3E1",
     "isCompleted": false,
     "lastModifiedDate": "2025-03-08T11:20:00Z",
     "listName": "Work",
@@ -492,7 +492,7 @@ Response:
 {
   "creationDate": "2025-03-10T15:05:23Z",
   "dueDate": "2025-03-11T09:00:00Z",
-  "id": "x-apple-reminder://D1E8F7C6-5A4B-3C2D-9E8F-7A6B5C4D3E2F",
+  "id": "D1E8F7C6-5A4B-3C2D-9E8F-7A6B5C4D3E2F",
   "isCompleted": false,
   "lastModifiedDate": "2025-03-10T15:05:23Z",
   "listName": "Soon",
@@ -506,7 +506,7 @@ Response:
 
 Request:
 ```bash
-curl -X DELETE http://localhost:8080/lists/Soon/reminders/x-apple-reminder://D1E8F7C6-5A4B-3C2D-9E8F-7A6B5C4D3E2F
+curl -X DELETE http://localhost:8080/lists/Soon/reminders/D1E8F7C6-5A4B-3C2D-9E8F-7A6B5C4D3E2F
 ```
 
 Response:
@@ -516,7 +516,7 @@ Response:
 
 Request:
 ```bash
-curl -X PATCH http://localhost:8080/lists/Soon/reminders/x-apple-reminder://F3A0B3D8-E153-4AB9-B341-0C32A9AC6C2D/complete
+curl -X PATCH http://localhost:8080/lists/Soon/reminders/F3A0B3D8-E153-4AB9-B341-0C32A9AC6C2D/complete
 ```
 
 Response:
@@ -526,41 +526,28 @@ Response:
 
 Request:
 ```bash
-curl -X PATCH http://localhost:8080/lists/Soon/reminders/x-apple-reminder://F3A0B3D8-E153-4AB9-B341-0C32A9AC6C2D/uncomplete
+curl -X PATCH http://localhost:8080/lists/Soon/reminders/F3A0B3D8-E153-4AB9-B341-0C32A9AC6C2D/uncomplete
 ```
 
 Response:
 - Status code 200 OK
 
-### Using with JavaScript/Fetch API
+### Using with curl
 
-```javascript
-// Get all reminder lists
-fetch('http://localhost:8080/lists')
-  .then(response => response.json())
-  .then(lists => console.log(lists));
+```bash
+# Get all reminder lists
+curl http://localhost:8080/lists
 
-// Create a new reminder
-fetch('http://localhost:8080/lists/Soon/reminders', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
-    title: 'Web reminder',
-    notes: 'Created from web app',
-    dueDate: '2025-03-15T10:00:00Z',
-    priority: 'medium'
-  }),
-})
-  .then(response => response.json())
-  .then(reminder => console.log(reminder));
+# Create a new reminder
+curl -X POST http://localhost:8080/lists/Soon/reminders \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Web reminder",
+    "notes": "Created from web app",
+    "dueDate": "2025-03-15T10:00:00Z",
+    "priority": "medium"
+  }'
 
-// Mark a reminder as complete
-fetch('http://localhost:8080/lists/Soon/reminders/x-apple-reminder://F3A0B3D8-E153-4AB9-B341-0C32A9AC6C2D/complete', {
-  method: 'PATCH'
-})
-  .then(response => {
-    if (response.ok) console.log('Reminder marked as complete');
-  });
+# Mark a reminder as complete
+curl -X PATCH http://localhost:8080/lists/Soon/reminders/F3A0B3D8-E153-4AB9-B341-0C32A9AC6C2D/complete
 ```
