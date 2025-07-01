@@ -407,6 +407,14 @@ public struct CLI: ParsableCommand {
             NewList.self,
             ShowAll.self,
             GetByUUID.self,
+            // Private API commands
+            ShowTags.self,
+            FilterByTag.self,
+            AddTag.self,
+            RemoveTag.self,
+            ShowSubtasks.self,
+            AddSubtask.self,
+            PrivateAPIStatus.self,
         ]
     )
 

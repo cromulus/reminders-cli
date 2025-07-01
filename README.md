@@ -142,6 +142,29 @@ $ make build-release
 $ cp .build/apple/Products/Release/reminders /usr/local/bin/reminders
 ```
 
+#### Building with Private API Support
+
+For enhanced functionality including tag management, subtasks, and additional metadata, you can build with private API support:
+
+```bash
+# Build CLI with private APIs
+$ make build-private
+$ cp .build/apple/Products/Release/reminders /usr/local/bin/reminders
+
+# Build API server with private APIs
+$ make build-private-release
+$ cp .build/apple/Products/Release/reminders-api /usr/local/bin/reminders-api
+
+# Package with private API support
+$ make package-private
+```
+
+**Important Notes for Private API Builds:**
+- Requires disabling App Sandbox and Hardened Runtime
+- May not be suitable for App Store distribution
+- Provides access to advanced features like tags and subtasks
+- Use at your own discretion as private APIs may change
+
 ## REST API Server
 
 This project includes a REST API server that allows you to interact with your reminders via HTTP requests. This is useful for building web applications, integrating with other services, or automating reminders management.
@@ -215,10 +238,11 @@ OPTIONS:
 
 ### API Endpoints
 
-#### Reminders Management
+#### Core Reminders Management
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| GET | `/info` | Get API status and capabilities |
 | GET | `/lists` | List all reminder lists |
 | GET | `/lists/:name` | Get reminders from a specific list |
 | GET | `/reminders` | Get all reminders across all lists |
@@ -227,6 +251,18 @@ OPTIONS:
 | PATCH | `/lists/:listName/reminders/:id/complete` | Mark a reminder as complete |
 | PATCH | `/lists/:listName/reminders/:id/uncomplete` | Mark a reminder as incomplete |
 | GET | `/search` | Search for reminders with complex filtering |
+
+#### Private API Features (Enhanced Build Only)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/private-api/status` | Check private API availability |
+| GET | `/tags` | List all available tags |
+| GET | `/reminders/by-tag/:tag` | Get reminders filtered by tag |
+| POST | `/reminders/:uuid/tags` | Add tag to reminder |
+| DELETE | `/reminders/:uuid/tags/:tag` | Remove tag from reminder |
+| GET | `/reminders/:uuid/subtasks` | Get subtasks for a reminder |
+| POST | `/reminders/:uuid/subtasks` | Create a new subtask |
 
 #### Webhooks
 

@@ -65,9 +65,14 @@ public enum Priority: String, ExpressibleByArgument {
 
 public final class Reminders {
     let store: EKEventStore
+    private let privateService: PrivateRemindersService
     
     public init(store: EKEventStore = sharedEventStore) {
         self.store = store
+        self.privateService = PrivateRemindersService()
+        
+        // Load private frameworks if available
+        PrivateRemindersLoader.loadPrivateFrameworks()
     }
     
     public static func requestAccess() -> (Bool, Error?) {
@@ -154,6 +159,30 @@ public final class Reminders {
         case .complete:
             return reminder.isCompleted
         }
+    }
+    
+    /// Get unified reminders that combine EventKit and private API data
+    public func getUnifiedReminders(
+        on calendars: [EKCalendar],
+        displayOptions: DisplayOptions,
+        completion: @escaping ([UnifiedReminder]) -> Void
+    ) {
+        self.reminders(on: calendars, displayOptions: displayOptions) { ekReminders in
+            let unifiedReminders = ekReminders.map { UnifiedReminder(from: $0) }
+            
+            if PrivateRemindersLoader.isPrivateAPIAvailable {
+                // TODO: Enhance with private API data when available
+                // For now, just return the EventKit-based reminders
+                completion(unifiedReminders)
+            } else {
+                completion(unifiedReminders)
+            }
+        }
+    }
+    
+    /// Check if private APIs are available
+    public var isPrivateAPIAvailable: Bool {
+        return PrivateRemindersLoader.isPrivateAPIAvailable
     }
     
     // Add functions for creating, deleting, and updating reminders for API

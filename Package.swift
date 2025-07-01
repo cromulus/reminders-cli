@@ -32,6 +32,9 @@ let package = Package(
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "Hummingbird", package: "hummingbird"),
+            ],
+            swiftSettings: [
+                .define("PRIVATE_REMINDERS_ENABLED", .when(configuration: .debug))
             ]
         ),
         .testTarget(

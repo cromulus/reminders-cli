@@ -43,6 +43,89 @@ The Reminders CLI HTTP API provides programmatic access to macOS Reminders data 
 | `--auth-required` | Require authentication for all endpoints | `false` |
 | `--generate-token` | Generate new token and exit | - |
 
+## Quick Start with curl
+
+### Start the API server:
+```bash
+# Start without authentication (default)
+reminders-api --port 8080
+
+# Start with authentication required
+reminders-api --port 8080 --auth-required --token YOUR_TOKEN
+```
+
+### Basic API calls:
+```bash
+# Get API status and capabilities
+curl http://localhost:8080/info
+
+# Get all reminder lists
+curl http://localhost:8080/lists
+
+# Get all reminders
+curl http://localhost:8080/reminders
+
+# Get reminders from specific list
+curl http://localhost:8080/lists/Shopping
+
+# Create a new reminder
+curl -X POST http://localhost:8080/lists/Shopping/reminders \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Buy milk", "notes": "2% milk", "priority": "medium"}'
+
+# Update a reminder
+curl -X PATCH http://localhost:8080/reminders/YOUR_UUID \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Buy organic milk", "isCompleted": false}'
+
+# Complete a reminder
+curl -X PATCH http://localhost:8080/reminders/YOUR_UUID/complete
+
+# Delete a reminder
+curl -X DELETE http://localhost:8080/reminders/YOUR_UUID
+
+# Search reminders
+curl "http://localhost:8080/search?query=milk&completed=false&limit=10"
+```
+
+### Private API examples (requires private build):
+```bash
+# Check private API status
+curl http://localhost:8080/private-api/status
+
+# Get all tags
+curl http://localhost:8080/tags
+
+# Filter reminders by tag
+curl http://localhost:8080/reminders/by-tag/work
+
+# Add tag to reminder
+curl -X POST http://localhost:8080/reminders/YOUR_UUID/tags \
+  -H "Content-Type: application/json" \
+  -d '{"tag": "urgent"}'
+
+# Remove tag from reminder
+curl -X DELETE http://localhost:8080/reminders/YOUR_UUID/tags/urgent
+
+# Get subtasks for a reminder
+curl http://localhost:8080/reminders/YOUR_UUID/subtasks
+
+# Create a subtask
+curl -X POST http://localhost:8080/reminders/YOUR_UUID/subtasks \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Review section 1", "notes": "Focus on technical details"}'
+```
+
+### With Authentication:
+```bash
+# When --auth-required is enabled, include the Bearer token:
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:8080/info
+
+# Or set it as an environment variable for convenience:
+export API_TOKEN="YOUR_TOKEN"
+curl -H "Authorization: Bearer $API_TOKEN" http://localhost:8080/reminders
+```
+
 ## Authentication
 
 ### Token-Based Authentication
@@ -493,10 +576,166 @@ PATCH /reminders/{uuid}/uncomplete
 - Concurrent webhook deliveries supported
 - EventKit notifications processed asynchronously
 
+## Private API Features (Enhanced Build Only)
+
+When the application is built with private API support (`-DPRIVATE_REMINDERS_ENABLED`), additional functionality becomes available:
+
+### Private API Status
+```http
+GET /private-api/status
+```
+
+**Response:**
+```json
+{
+  "available": true,
+  "features": [
+    "tag-management",
+    "subtask-operations", 
+    "enhanced-metadata",
+    "attachment-info"
+  ],
+  "buildConfiguration": "private-api-enabled"
+}
+```
+
+### Tag Management
+
+#### Get All Tags
+```http
+GET /tags
+```
+
+**Response:**
+```json
+{
+  "tags": ["work", "personal", "urgent"],
+  "message": "Tag listing functionality..."
+}
+```
+
+#### Filter Reminders by Tag
+```http
+GET /reminders/by-tag/{tag}
+```
+
+**Response:**
+```json
+{
+  "tag": "work",
+  "reminders": [...],
+  "message": "Tag filtering functionality..."
+}
+```
+
+#### Add Tag to Reminder
+```http
+POST /reminders/{uuid}/tags
+Content-Type: application/json
+
+{
+  "tag": "urgent"
+}
+```
+
+**Response:**
+```json
+{
+  "success": false,
+  "message": "Tag addition functionality...",
+  "reminderUuid": "...",
+  "tag": "urgent"
+}
+```
+
+#### Remove Tag from Reminder
+```http
+DELETE /reminders/{uuid}/tags/{tag}
+```
+
+**Response:**
+```json
+{
+  "success": false,
+  "message": "Tag removal functionality...",
+  "reminderUuid": "...",
+  "tag": "urgent"
+}
+```
+
+### Subtask Operations
+
+#### Get Subtasks
+```http
+GET /reminders/{uuid}/subtasks
+```
+
+**Response:**
+```json
+{
+  "parentUuid": "...",
+  "subtasks": [...],
+  "message": "Subtask listing functionality..."
+}
+```
+
+#### Create Subtask
+```http
+POST /reminders/{uuid}/subtasks
+Content-Type: application/json
+
+{
+  "title": "Subtask title",
+  "notes": "Optional notes"
+}
+```
+
+**Response:**
+```json
+{
+  "success": false,
+  "message": "Subtask creation functionality...",
+  "parentUuid": "...",
+  "subtaskTitle": "Subtask title"
+}
+```
+
+### Enhanced Reminder Data
+
+When private APIs are available, reminder objects include additional `privateApiData` field:
+
+```json
+{
+  "uuid": "...",
+  "title": "...",
+  // ... standard fields ...
+  "privateApiData": {
+    "isSubtask": false,
+    "parentId": null,
+    "tags": ["work", "urgent"],
+    "subtaskCount": 2,
+    "hasAttachments": false,
+    "flags": []
+  }
+}
+```
+
+### Private API Error Responses
+
+When private APIs are not available:
+```json
+{
+  "error": "Private API not available. Tag management requires private API access.",
+  "status": 501
+}
+```
+
 ## Security Considerations
 
 - API tokens should be treated as secrets
 - HTTPS recommended for production deployments
+- Private API features require disabled App Sandbox and Hardened Runtime
+- Private API access may expose additional system information
 - CORS enabled for web applications
 - Webhook URLs should use HTTPS
 - No rate limiting - implement at reverse proxy level if needed

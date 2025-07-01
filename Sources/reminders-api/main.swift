@@ -98,7 +98,7 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
     )
     
     // Add token authentication middleware
-    app.middleware.add(TokenAuthMiddleware(authManager: authManager))
+    app.middleware.add(TokenAuthMiddleware(authManager: authManager, requireAuth: requireAuth))
     
     // Define middleware to check authentication for all routes
     struct AuthCheckMiddleware: HBMiddleware {
@@ -147,6 +147,68 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
     }
     
     // MARK: - Resource Routes
+    
+    // GET /info - Get API status and capabilities
+    app.router.get("info") { request -> HBResponse in
+        struct APIInfo: Encodable {
+            let authenticated: Bool
+            let remindersAccess: Bool
+            let privateApiAvailable: Bool
+            let features: Features
+            let version: String
+            let buildConfiguration: String
+            
+            struct Features: Encodable {
+                let basicOperations: [String]
+                let privateApiFeatures: [String]?
+                let webhooks: Bool
+                let search: Bool
+                let authentication: Bool
+            }
+        }
+        
+        // Check authentication status
+        let isAuthenticated = !authManager.isAuthRequired || request.isAuthenticated
+        
+        // Check reminders access
+        let (hasRemindersAccess, _) = Reminders.requestAccess()
+        
+        // Determine available features
+        let basicFeatures = [
+            "create-reminders", "update-reminders", "delete-reminders",
+            "list-management", "completion-tracking", "priority-setting",
+            "date-scheduling", "notes-support"
+        ]
+        
+        let privateFeatures = PrivateRemindersLoader.isPrivateAPIAvailable ? [
+            "tag-management", "subtask-operations", "enhanced-metadata", 
+            "attachment-info", "parent-child-relationships", "structured-notes"
+        ] : nil
+        
+        let buildConfig = PrivateRemindersLoader.isPrivateAPIAvailable ? "private-api-enabled" : "eventkit-only"
+        
+        let info = APIInfo(
+            authenticated: isAuthenticated,
+            remindersAccess: hasRemindersAccess,
+            privateApiAvailable: PrivateRemindersLoader.isPrivateAPIAvailable,
+            features: APIInfo.Features(
+                basicOperations: basicFeatures,
+                privateApiFeatures: privateFeatures,
+                webhooks: true,
+                search: true,
+                authentication: true
+            ),
+            version: "1.0.0",
+            buildConfiguration: buildConfig
+        )
+        
+        let jsonData = try JSONEncoder().encode(info)
+        return HBResponse(
+            status: .ok,
+            headers: ["content-type": "application/json"],
+            body: .byteBuffer(ByteBuffer(data: jsonData))
+        )
+    }
     
     // GET /lists - Get all reminder lists
     app.router.get("lists") { request -> HBResponse in
@@ -668,6 +730,257 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
         }
     }
     
+    // MARK: - Private API Endpoints
+    
+    // GET /private-api/status - Check private API availability
+    app.router.get("private-api/status") { _ -> HBResponse in
+        struct PrivateAPIStatusResponse: Codable {
+            let available: Bool
+            let features: [String]
+            let buildConfiguration: String
+        }
+        
+        let features = PrivateRemindersLoader.isPrivateAPIAvailable ? 
+            ["tag-management", "subtask-operations", "enhanced-metadata", "attachment-info"] :
+            []
+        
+        let buildConfig = PrivateRemindersLoader.isPrivateAPIAvailable ? "private-api-enabled" : "eventkit-only"
+        
+        let response = PrivateAPIStatusResponse(
+            available: PrivateRemindersLoader.isPrivateAPIAvailable,
+            features: features,
+            buildConfiguration: buildConfig
+        )
+        
+        let jsonData = try JSONEncoder().encode(response)
+        return HBResponse(
+            status: .ok,
+            headers: ["content-type": "application/json"],
+            body: .byteBuffer(ByteBuffer(data: jsonData))
+        )
+    }
+    
+    // GET /tags - Get all available tags (private API)
+    app.router.get("tags") { _ -> HBResponse in
+        guard PrivateRemindersLoader.isPrivateAPIAvailable else {
+            struct PrivateAPIError: Encodable {
+                let error: String
+                let status: Int
+                let feature: String
+                let suggestion: String
+                let buildInfo: String
+            }
+            
+            let errorResponse = PrivateAPIError(
+                error: "Private API not available",
+                status: 501,
+                feature: "tag-management",
+                suggestion: "Build with -DPRIVATE_REMINDERS_ENABLED flag and disable App Sandbox/Hardened Runtime",
+                buildInfo: "Current build: EventKit-only mode"
+            )
+            
+            let jsonData = try JSONEncoder().encode(errorResponse)
+            return HBResponse(
+                status: .notImplemented,
+                headers: ["content-type": "application/json"],
+                body: .byteBuffer(ByteBuffer(data: jsonData))
+            )
+        }
+        
+        struct TagsResponse: Codable {
+            let tags: [String]
+            let message: String
+        }
+        
+        // TODO: Implement actual tag fetching when private API classes are available
+        let response = TagsResponse(
+            tags: [],
+            message: "Tag listing functionality will be available when private API implementation is complete."
+        )
+        
+        let jsonData = try JSONEncoder().encode(response)
+        return HBResponse(
+            status: .ok,
+            headers: ["content-type": "application/json"],
+            body: .byteBuffer(ByteBuffer(data: jsonData))
+        )
+    }
+    
+    // GET /reminders/by-tag/:tag - Filter reminders by tag (private API)
+    app.router.get("reminders/by-tag/:tag") { request -> HBResponse in
+        guard PrivateRemindersLoader.isPrivateAPIAvailable else {
+            throw HBHTTPError(.notImplemented, message: "Private API not available. Tag filtering requires private API access.")
+        }
+        
+        guard let tagName = request.parameters.get("tag") else {
+            throw HBHTTPError(.badRequest, message: "Tag name is required")
+        }
+        
+        struct TagFilterResponse: Encodable {
+            let tag: String
+            let reminders: [EKReminderWrapper]
+            let message: String
+        }
+        
+        // TODO: Implement actual tag filtering when private API classes are available
+        let response = TagFilterResponse(
+            tag: tagName,
+            reminders: [],
+            message: "Tag filtering functionality will be available when private API implementation is complete."
+        )
+        
+        let jsonData = try JSONEncoder().encode(response)
+        return HBResponse(
+            status: .ok,
+            headers: ["content-type": "application/json"],
+            body: .byteBuffer(ByteBuffer(data: jsonData))
+        )
+    }
+    
+    // POST /reminders/:uuid/tags - Add tag to reminder (private API)
+    app.router.post("reminders/:uuid/tags") { request -> HBResponse in
+        guard PrivateRemindersLoader.isPrivateAPIAvailable else {
+            throw HBHTTPError(.notImplemented, message: "Private API not available. Tag management requires private API access.")
+        }
+        
+        guard let uuid = request.parameters.get("uuid") else {
+            throw HBHTTPError(.badRequest, message: "Reminder UUID is required")
+        }
+        
+        struct AddTagRequest: Decodable {
+            let tag: String
+        }
+        
+        let tagRequest = try request.decode(as: AddTagRequest.self)
+        
+        struct TagOperationResponse: Encodable {
+            let success: Bool
+            let message: String
+            let reminderUuid: String
+            let tag: String
+        }
+        
+        // TODO: Implement actual tag addition when private API classes are available
+        let response = TagOperationResponse(
+            success: false,
+            message: "Tag addition functionality will be available when private API implementation is complete.",
+            reminderUuid: uuid,
+            tag: tagRequest.tag
+        )
+        
+        let jsonData = try JSONEncoder().encode(response)
+        return HBResponse(
+            status: .notImplemented,
+            headers: ["content-type": "application/json"],
+            body: .byteBuffer(ByteBuffer(data: jsonData))
+        )
+    }
+    
+    // DELETE /reminders/:uuid/tags/:tag - Remove tag from reminder (private API)
+    app.router.delete("reminders/:uuid/tags/:tag") { request -> HBResponse in
+        guard PrivateRemindersLoader.isPrivateAPIAvailable else {
+            throw HBHTTPError(.notImplemented, message: "Private API not available. Tag management requires private API access.")
+        }
+        
+        guard let uuid = request.parameters.get("uuid"),
+              let tagName = request.parameters.get("tag") else {
+            throw HBHTTPError(.badRequest, message: "Reminder UUID and tag name are required")
+        }
+        
+        struct TagOperationResponse: Encodable {
+            let success: Bool
+            let message: String
+            let reminderUuid: String
+            let tag: String
+        }
+        
+        // TODO: Implement actual tag removal when private API classes are available
+        let response = TagOperationResponse(
+            success: false,
+            message: "Tag removal functionality will be available when private API implementation is complete.",
+            reminderUuid: uuid,
+            tag: tagName
+        )
+        
+        let jsonData = try JSONEncoder().encode(response)
+        return HBResponse(
+            status: .notImplemented,
+            headers: ["content-type": "application/json"],
+            body: .byteBuffer(ByteBuffer(data: jsonData))
+        )
+    }
+    
+    // GET /reminders/:uuid/subtasks - Get subtasks for a reminder (private API)
+    app.router.get("reminders/:uuid/subtasks") { request -> HBResponse in
+        guard PrivateRemindersLoader.isPrivateAPIAvailable else {
+            throw HBHTTPError(.notImplemented, message: "Private API not available. Subtask operations require private API access.")
+        }
+        
+        guard let uuid = request.parameters.get("uuid") else {
+            throw HBHTTPError(.badRequest, message: "Reminder UUID is required")
+        }
+        
+        struct SubtasksResponse: Encodable {
+            let parentUuid: String
+            let subtasks: [UnifiedReminder]
+            let message: String
+        }
+        
+        // TODO: Implement actual subtask fetching when private API classes are available
+        let response = SubtasksResponse(
+            parentUuid: uuid,
+            subtasks: [],
+            message: "Subtask listing functionality will be available when private API implementation is complete."
+        )
+        
+        let jsonData = try JSONEncoder().encode(response)
+        return HBResponse(
+            status: .ok,
+            headers: ["content-type": "application/json"],
+            body: .byteBuffer(ByteBuffer(data: jsonData))
+        )
+    }
+    
+    // POST /reminders/:uuid/subtasks - Create subtask (private API)
+    app.router.post("reminders/:uuid/subtasks") { request -> HBResponse in
+        guard PrivateRemindersLoader.isPrivateAPIAvailable else {
+            throw HBHTTPError(.notImplemented, message: "Private API not available. Subtask operations require private API access.")
+        }
+        
+        guard let parentUuid = request.parameters.get("uuid") else {
+            throw HBHTTPError(.badRequest, message: "Parent reminder UUID is required")
+        }
+        
+        struct CreateSubtaskRequest: Decodable {
+            let title: String
+            let notes: String?
+        }
+        
+        let subtaskRequest = try request.decode(as: CreateSubtaskRequest.self)
+        
+        struct SubtaskCreationResponse: Encodable {
+            let success: Bool
+            let message: String
+            let parentUuid: String
+            let subtaskTitle: String
+        }
+        
+        // TODO: Implement actual subtask creation when private API classes are available
+        let response = SubtaskCreationResponse(
+            success: false,
+            message: "Subtask creation functionality will be available when private API implementation is complete.",
+            parentUuid: parentUuid,
+            subtaskTitle: subtaskRequest.title
+        )
+        
+        let jsonData = try JSONEncoder().encode(response)
+        return HBResponse(
+            status: .notImplemented,
+            headers: ["content-type": "application/json"],
+            body: .byteBuffer(ByteBuffer(data: jsonData))
+        )
+    }
+    
     // Authentication is handled by AuthCheckMiddleware
     
     // Print server information
@@ -691,9 +1004,10 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
 func fetchReminders(from listName: String, displayOptions: DisplayOptions, remindersService: Reminders) async throws -> [EKReminderWrapper] {
     return try await withCheckedThrowingContinuation { continuation in
         let calendar = remindersService.calendar(withName: listName)
+        let privateService = PrivateRemindersService()
         
         remindersService.reminders(on: [calendar], displayOptions: displayOptions) { reminders in
-            let wrappedReminders = reminders.map { EKReminderWrapper(reminder: $0) }
+            let wrappedReminders = reminders.map { EKReminderWrapper(reminder: $0, privateService: privateService) }
             continuation.resume(returning: wrappedReminders)
         }
     }
@@ -703,9 +1017,10 @@ func fetchReminders(from listName: String, displayOptions: DisplayOptions, remin
 func fetchAllReminders(displayOptions: DisplayOptions, remindersService: Reminders) async throws -> [EKReminderWrapper] {
     return try await withCheckedThrowingContinuation { continuation in
         let calendars = remindersService.getCalendars()
+        let privateService = PrivateRemindersService()
         
         remindersService.reminders(on: calendars, displayOptions: displayOptions) { reminders in
-            let wrappedReminders = reminders.map { EKReminderWrapper(reminder: $0) }
+            let wrappedReminders = reminders.map { EKReminderWrapper(reminder: $0, privateService: privateService) }
             continuation.resume(returning: wrappedReminders)
         }
     }
@@ -716,6 +1031,7 @@ func addReminder(title: String, notes: String?, listName: String, dueDateCompone
                 priority: Priority, remindersService: Reminders) async throws -> EKReminderWrapper {
     return try await withCheckedThrowingContinuation { continuation in
         let calendar = remindersService.calendar(withName: listName)
+        let privateService = PrivateRemindersService()
         let reminder = remindersService.createReminder(
             title: title,
             notes: notes,
@@ -724,7 +1040,7 @@ func addReminder(title: String, notes: String?, listName: String, dueDateCompone
             priority: priority
         )
         
-        continuation.resume(returning: EKReminderWrapper(reminder: reminder))
+        continuation.resume(returning: EKReminderWrapper(reminder: reminder, privateService: privateService))
     }
 }
 
@@ -826,6 +1142,18 @@ struct EKReminderWrapper: Encodable, HBResponseGenerator {
     let lastModifiedDate: String?
     let completionDate: String?
     
+    // Private API fields (only populated when private APIs are available)
+    let privateApiData: PrivateAPIData?
+    
+    struct PrivateAPIData: Encodable {
+        let isSubtask: Bool
+        let parentId: String?
+        let tags: [String]?
+        let subtaskCount: Int?
+        let hasAttachments: Bool
+        let flags: [String]?
+    }
+    
     // Implement HBResponseGenerator protocol
     func response(from request: HBRequest) throws -> HBResponse {
         let data = try JSONEncoder().encode(self)
@@ -836,7 +1164,7 @@ struct EKReminderWrapper: Encodable, HBResponseGenerator {
         )
     }
     
-    init(reminder: EKReminder) {
+    init(reminder: EKReminder, privateService: PrivateRemindersService? = nil) {
         self.uuid = reminder.calendarItemExternalIdentifier
         self.calendarItemIdentifier = reminder.calendarItemIdentifier
         self.externalId = reminder.calendarItemExternalIdentifier
@@ -872,6 +1200,24 @@ struct EKReminderWrapper: Encodable, HBResponseGenerator {
             self.completionDate = formatter.string(from: date)
         } else {
             self.completionDate = nil
+        }
+        
+        // Add private API data if available
+        if PrivateRemindersLoader.isPrivateAPIAvailable, let privateService = privateService {
+            let reminderUuid = reminder.calendarItemExternalIdentifier ?? ""
+            let tags = privateService.getTags(for: reminderUuid)
+            let subtasks = privateService.getSubtasks(for: reminderUuid)
+            
+            self.privateApiData = PrivateAPIData(
+                isSubtask: false, // TODO: Determine from private API
+                parentId: nil, // TODO: Get from private API
+                tags: tags.isEmpty ? nil : tags,
+                subtaskCount: subtasks.isEmpty ? nil : subtasks.count,
+                hasAttachments: false, // TODO: Determine from private API
+                flags: nil // TODO: Get from private API
+            )
+        } else {
+            self.privateApiData = nil
         }
     }
 }

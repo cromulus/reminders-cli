@@ -38,11 +38,17 @@ public class AuthManager {
         // Set config file path
         self.configURL = remindersDirectory.appendingPathComponent("auth_config.json")
         
-        // Set the admin token if provided
-        self.adminToken = token
-        self.requireAuth = requireAuth
+        // Load existing config first
+        self.requireAuth = false  // Default
+        loadConfig()
         
-        // Save config
+        // Override with command line parameters (CLI takes precedence)
+        if let token = token {
+            self.adminToken = token
+        }
+        self.requireAuth = requireAuth  // CLI flag always overrides stored config
+        
+        // Save the current state (preserves CLI overrides)
         saveConfig()
     }
     
