@@ -66,6 +66,40 @@ private struct ShowAll: ParsableCommand {
     }
 }
 
+private struct ShowSubtasks: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Print all subtasks (reminders with parent reminders)")
+
+    @Flag(help: "Show completed subtasks only")
+    var onlyCompleted = false
+
+    @Flag(help: "Include completed subtasks in output")
+    var includeCompleted = false
+
+    @Option(
+        name: .shortAndLong,
+        help: "format, either of 'plain' or 'json'")
+    var format: OutputFormat = .plain
+
+    func validate() throws {
+        if self.onlyCompleted && self.includeCompleted {
+            throw ValidationError(
+                "Cannot specify both --show-completed and --only-completed")
+        }
+    }
+
+    func run() {
+        var displayOptions = DisplayOptions.incomplete
+        if self.onlyCompleted {
+            displayOptions = .complete
+        } else if self.includeCompleted {
+            displayOptions = .all
+        }
+
+        reminders.showSubtasks(displayOptions: displayOptions, outputFormat: format)
+    }
+}
+
 private struct Show: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Print the items on the given list")
@@ -392,6 +426,169 @@ private struct GetByUUID: ParsableCommand {
     }
 }
 
+private struct ShowItem: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Show a specific reminder by UUID or list name and index")
+
+    @Argument(help: "UUID of the reminder, or list name if using --index")
+    var identifier: String
+
+    @Option(
+        name: .shortAndLong,
+        help: "Index of the reminder in the specified list")
+    var index: String?
+
+    @Option(
+        name: .shortAndLong,
+        help: "format, either of 'plain' or 'json'")
+    var format: OutputFormat = .plain
+
+    func validate() throws {
+        // If index is provided, identifier should be a list name
+        // If index is not provided, identifier should be a UUID
+        if index != nil {
+            // identifier is list name, index is the reminder index
+        } else {
+            // identifier should be a UUID format
+            if identifier.count != 36 || identifier.filter({ $0 == "-" }).count != 4 {
+                throw ValidationError("When not using --index, identifier must be a valid UUID")
+            }
+        }
+    }
+
+    func run() {
+        if let index = index {
+            // Show by list name + index
+            reminders.showItem(onListNamed: identifier, atIndex: index, outputFormat: format)
+        } else {
+            // Show by UUID
+            reminders.showItem(withUUID: identifier, outputFormat: format)
+        }
+    }
+}
+
+private struct Move: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Move a reminder from one list to another")
+
+    @Argument(help: "Source list name")
+    var sourceList: String
+
+    @Argument(help: "Index or UUID of the reminder to move")
+    var reminderIdentifier: String
+
+    @Argument(help: "Target list name")
+    var targetList: String
+
+    func run() {
+        reminders.moveReminder(
+            identifier: reminderIdentifier,
+            fromList: sourceList,
+            toList: targetList)
+    }
+}
+
+private struct SetPriority: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Set the priority of a reminder")
+
+    @Argument(help: "List name or UUID if using --uuid")
+    var listOrUUID: String
+
+    @Argument(help: "Index of the reminder (not needed if using --uuid)")
+    var index: String?
+
+    @Argument(help: "Priority level")
+    var priority: Priority
+
+    @Flag(help: "Treat first argument as UUID instead of list name")
+    var uuid = false
+
+    func run() {
+        if uuid {
+            reminders.setPriority(priority, forReminderWithUUID: listOrUUID)
+        } else {
+            guard let index = index else {
+                print("Index is required when not using --uuid")
+                Foundation.exit(1)
+            }
+            reminders.setPriority(priority, 
+                                onListNamed: listOrUUID, 
+                                atIndex: index)
+        }
+    }
+}
+
+private struct AddUrl: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Add a URL attachment to a reminder")
+
+    @Argument(help: "List name or UUID if using --uuid")
+    var listOrUUID: String
+
+    @Argument(help: "Index of the reminder (not needed if using --uuid)")
+    var index: String?
+
+    @Argument(help: "URL to attach")
+    var url: String
+
+    @Flag(help: "Treat first argument as UUID instead of list name")
+    var uuid = false
+
+    func validate() throws {
+        guard URL(string: url) != nil else {
+            throw ValidationError("Invalid URL format")
+        }
+    }
+
+    func run() {
+        if uuid {
+            reminders.addURL(url, toReminderWithUUID: listOrUUID)
+        } else {
+            guard let index = index else {
+                print("Index is required when not using --uuid")
+                Foundation.exit(1)
+            }
+            reminders.addURL(url, 
+                           onListNamed: listOrUUID, 
+                           atIndex: index)
+        }
+    }
+}
+
+private struct MakeSubtask: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Make a reminder a subtask of another reminder")
+
+    @Argument(help: "Child list name or UUID if using --child-uuid")
+    var childListOrUUID: String
+
+    @Argument(help: "Child index (not needed if using --child-uuid)")
+    var childIndex: String?
+
+    @Argument(help: "Parent list name or UUID if using --parent-uuid")
+    var parentListOrUUID: String
+
+    @Argument(help: "Parent index (not needed if using --parent-uuid)")
+    var parentIndex: String?
+
+    @Flag(help: "Treat child argument as UUID")
+    var childUuid = false
+
+    @Flag(help: "Treat parent argument as UUID")
+    var parentUuid = false
+
+    func run() {
+        reminders.makeSubtask(
+            childList: childUuid ? nil : childListOrUUID,
+            childIndex: childUuid ? nil : childIndex,
+            childUUID: childUuid ? childListOrUUID : nil,
+            parentList: parentUuid ? nil : parentListOrUUID,
+            parentIndex: parentUuid ? nil : parentIndex,
+            parentUUID: parentUuid ? parentListOrUUID : nil)
+    }
+}
+
 public struct CLI: ParsableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "reminders",
@@ -404,9 +601,15 @@ public struct CLI: ParsableCommand {
             Edit.self,
             Show.self,
             ShowLists.self,
+            ShowSubtasks.self,
             NewList.self,
             ShowAll.self,
             GetByUUID.self,
+            ShowItem.self,
+            Move.self,
+            SetPriority.self,
+            AddUrl.self,
+            MakeSubtask.self,
         ]
     )
 
