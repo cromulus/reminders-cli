@@ -560,7 +560,7 @@ public final class Reminders {
 
             do {
                 reminder.calendar = targetCalendar
-                try Store.save(reminder, commit: true)
+                try self.store.save(reminder, commit: true)
                 print("Moved '\(reminder.title ?? "")' from '\(sourceListName)' to '\(targetListName)'")
             } catch let error {
                 print("Failed to move reminder with error: \(error)")
@@ -585,7 +585,7 @@ public final class Reminders {
 
             do {
                 reminder.priority = Int(priority.value.rawValue)
-                try Store.save(reminder, commit: true)
+                try self.store.save(reminder, commit: true)
                 print("Set priority of '\(reminder.title ?? "")' to \(priority)")
             } catch let error {
                 print("Failed to update reminder priority with error: \(error)")
@@ -609,7 +609,7 @@ public final class Reminders {
 
             do {
                 reminder.priority = Int(priority.value.rawValue)
-                try Store.save(reminder, commit: true)
+                try self.store.save(reminder, commit: true)
                 print("Set priority of '\(reminder.title ?? "")' to \(priority)")
             } catch let error {
                 print("Failed to update reminder priority with error: \(error)")
