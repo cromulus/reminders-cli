@@ -16,6 +16,10 @@ extension EKReminder: @retroactive Encodable {
         case startDate
         case dueDate
         case list
+        case attachedUrl
+        case mailUrl
+        case parentId
+        case isSubtask
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -30,6 +34,13 @@ extension EKReminder: @retroactive Encodable {
         // url field is nil
         // https://developer.apple.com/forums/thread/128140
         try container.encodeIfPresent(self.url, forKey: .url)
+        
+        // Private API fields
+        try container.encodeIfPresent(self.attachedUrl?.absoluteString, forKey: .attachedUrl)
+        try container.encodeIfPresent(self.mailUrl?.absoluteString, forKey: .mailUrl)
+        try container.encodeIfPresent(self.parentId, forKey: .parentId)
+        try container.encode(self.isSubtask, forKey: .isSubtask)
+        
         try container.encodeIfPresent(format(self.completionDate), forKey: .completionDate)
 
         for alarm in self.alarms ?? [] {

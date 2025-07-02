@@ -22,7 +22,25 @@ private func format(_ reminder: EKReminder, at index: Int?, listName: String? = 
     let listString = listName.map { "\($0): " } ?? ""
     let notesString = reminder.notes.map { " (\($0))" } ?? ""
     let indexString = index.map { "\($0): " } ?? ""
-    return "\(listString)\(indexString)\(reminder.title ?? "<unknown>")\(notesString)\(dateString)\(priorityString)"
+    
+    // Additional information from private APIs
+    var additionalInfo: [String] = []
+    
+    if reminder.isSubtask {
+        additionalInfo.append("subtask")
+    }
+    
+    if let attachedUrl = reminder.attachedUrl {
+        additionalInfo.append("url: \(attachedUrl.absoluteString)")
+    }
+    
+    if let mailUrl = reminder.mailUrl {
+        additionalInfo.append("mail: \(mailUrl.absoluteString)")
+    }
+    
+    let additionalString = additionalInfo.isEmpty ? "" : " [\(additionalInfo.joined(separator: ", "))]"
+    
+    return "\(listString)\(indexString)\(reminder.title ?? "<unknown>")\(notesString)\(dateString)\(priorityString)\(additionalString)"
 }
 
 public enum OutputFormat: String, ExpressibleByArgument {
@@ -135,6 +153,28 @@ public final class Reminders {
             case .plain:
                 for (reminder, i, listName) in matchingReminders {
                     print(format(reminder, at: i, listName: listName))
+                }
+            }
+
+            semaphore.signal()
+        }
+
+        semaphore.wait()
+    }
+
+    func showSubtasks(displayOptions: DisplayOptions, outputFormat: OutputFormat) {
+        let semaphore = DispatchSemaphore(value: 0)
+
+        self.reminders(on: self.getCalendars(), displayOptions: displayOptions) { reminders in
+            let subtasks = reminders.filter { $0.isSubtask }
+            
+            switch outputFormat {
+            case .json:
+                print(encodeToJson(data: subtasks))
+            case .plain:
+                for (i, subtask) in subtasks.enumerated() {
+                    let listName = subtask.calendar.title
+                    print(format(subtask, at: i, listName: listName))
                 }
             }
 

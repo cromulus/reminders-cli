@@ -60,6 +60,40 @@ private struct ShowAll: ParsableCommand {
     }
 }
 
+private struct ShowSubtasks: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Print all subtasks (reminders with parent reminders)")
+
+    @Flag(help: "Show completed subtasks only")
+    var onlyCompleted = false
+
+    @Flag(help: "Include completed subtasks in output")
+    var includeCompleted = false
+
+    @Option(
+        name: .shortAndLong,
+        help: "format, either of 'plain' or 'json'")
+    var format: OutputFormat = .plain
+
+    func validate() throws {
+        if self.onlyCompleted && self.includeCompleted {
+            throw ValidationError(
+                "Cannot specify both --show-completed and --only-completed")
+        }
+    }
+
+    func run() {
+        var displayOptions = DisplayOptions.incomplete
+        if self.onlyCompleted {
+            displayOptions = .complete
+        } else if self.includeCompleted {
+            displayOptions = .all
+        }
+
+        reminders.showSubtasks(displayOptions: displayOptions, outputFormat: format)
+    }
+}
+
 private struct Show: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Print the items on the given list")
@@ -295,6 +329,7 @@ public struct CLI: ParsableCommand {
             Edit.self,
             Show.self,
             ShowLists.self,
+            ShowSubtasks.self,
             NewList.self,
             ShowAll.self,
         ]
