@@ -381,6 +381,197 @@ public final class Reminders {
         }
     }
 
+    func showItem(onListNamed listName: String, atIndex index: String, outputFormat: OutputFormat) {
+        let calendar = self.calendar(withName: listName)
+        let semaphore = DispatchSemaphore(value: 0)
+
+        self.reminders(on: [calendar], displayOptions: .all) { reminders in
+            guard let reminder = self.getReminder(from: reminders, at: index) else {
+                print("No reminder at index \(index) on \(listName)")
+                exit(1)
+            }
+
+            switch outputFormat {
+            case .json:
+                print(encodeToJson(data: reminder))
+            case .plain:
+                print(format(reminder, at: nil, listName: listName))
+            }
+
+            semaphore.signal()
+        }
+
+        semaphore.wait()
+    }
+
+    func showItem(withUUID uuid: String, outputFormat: OutputFormat) {
+        let semaphore = DispatchSemaphore(value: 0)
+
+        self.reminders(on: self.getCalendars(), displayOptions: .all) { reminders in
+            guard let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == uuid }) else {
+                print("No reminder found with UUID \(uuid)")
+                exit(1)
+            }
+
+            switch outputFormat {
+            case .json:
+                print(encodeToJson(data: reminder))
+            case .plain:
+                print(format(reminder, at: nil, listName: reminder.calendar.title))
+            }
+
+            semaphore.signal()
+        }
+
+        semaphore.wait()
+    }
+
+    func moveReminder(identifier: String, fromList sourceListName: String, toList targetListName: String) {
+        let sourceCalendar = self.calendar(withName: sourceListName)
+        let targetCalendar = self.calendar(withName: targetListName)
+        let semaphore = DispatchSemaphore(value: 0)
+
+        self.reminders(on: [sourceCalendar], displayOptions: .all) { reminders in
+            guard let reminder = self.getReminder(from: reminders, at: identifier) else {
+                print("No reminder found with identifier \(identifier) on \(sourceListName)")
+                exit(1)
+            }
+
+            do {
+                reminder.calendar = targetCalendar
+                try Store.save(reminder, commit: true)
+                print("Moved '\(reminder.title ?? "")' from '\(sourceListName)' to '\(targetListName)'")
+            } catch let error {
+                print("Failed to move reminder with error: \(error)")
+                exit(1)
+            }
+
+            semaphore.signal()
+        }
+
+        semaphore.wait()
+    }
+
+    func setPriority(_ priority: Priority, onListNamed listName: String, atIndex index: String) {
+        let calendar = self.calendar(withName: listName)
+        let semaphore = DispatchSemaphore(value: 0)
+
+        self.reminders(on: [calendar], displayOptions: .all) { reminders in
+            guard let reminder = self.getReminder(from: reminders, at: index) else {
+                print("No reminder at index \(index) on \(listName)")
+                exit(1)
+            }
+
+            do {
+                reminder.priority = Int(priority.value.rawValue)
+                try Store.save(reminder, commit: true)
+                print("Set priority of '\(reminder.title ?? "")' to \(priority)")
+            } catch let error {
+                print("Failed to update reminder priority with error: \(error)")
+                exit(1)
+            }
+
+            semaphore.signal()
+        }
+
+        semaphore.wait()
+    }
+
+    func setPriority(_ priority: Priority, forReminderWithUUID uuid: String) {
+        let semaphore = DispatchSemaphore(value: 0)
+
+        self.reminders(on: self.getCalendars(), displayOptions: .all) { reminders in
+            guard let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == uuid }) else {
+                print("No reminder found with UUID \(uuid)")
+                exit(1)
+            }
+
+            do {
+                reminder.priority = Int(priority.value.rawValue)
+                try Store.save(reminder, commit: true)
+                print("Set priority of '\(reminder.title ?? "")' to \(priority)")
+            } catch let error {
+                print("Failed to update reminder priority with error: \(error)")
+                exit(1)
+            }
+
+            semaphore.signal()
+        }
+
+        semaphore.wait()
+    }
+
+    func addURL(_ urlString: String, onListNamed listName: String, atIndex index: String) {
+        guard let url = URL(string: urlString) else {
+            print("Invalid URL: \(urlString)")
+            exit(1)
+        }
+
+        let calendar = self.calendar(withName: listName)
+        let semaphore = DispatchSemaphore(value: 0)
+
+        self.reminders(on: [calendar], displayOptions: .all) { reminders in
+            guard let reminder = self.getReminder(from: reminders, at: index) else {
+                print("No reminder at index \(index) on \(listName)")
+                exit(1)
+            }
+
+            // Note: EventKit doesn't provide a public API to add URL attachments
+            // This would require using private APIs similar to what we do for reading
+            print("Warning: Adding URL attachments requires private APIs that may not be stable")
+            print("URL to attach: \(url.absoluteString)")
+            print("This feature is not yet implemented due to EventKit limitations")
+
+            semaphore.signal()
+        }
+
+        semaphore.wait()
+    }
+
+    func addURL(_ urlString: String, toReminderWithUUID uuid: String) {
+        guard let url = URL(string: urlString) else {
+            print("Invalid URL: \(urlString)")
+            exit(1)
+        }
+
+        let semaphore = DispatchSemaphore(value: 0)
+
+        self.reminders(on: self.getCalendars(), displayOptions: .all) { reminders in
+            guard let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == uuid }) else {
+                print("No reminder found with UUID \(uuid)")
+                exit(1)
+            }
+
+            // Note: EventKit doesn't provide a public API to add URL attachments
+            print("Warning: Adding URL attachments requires private APIs that may not be stable")
+            print("URL to attach: \(url.absoluteString)")
+            print("This feature is not yet implemented due to EventKit limitations")
+
+            semaphore.signal()
+        }
+
+        semaphore.wait()
+    }
+
+    func makeSubtask(childList: String?, childIndex: String?, childUUID: String?,
+                    parentList: String?, parentIndex: String?, parentUUID: String?) {
+        // Note: EventKit doesn't provide a public API to create subtask relationships
+        print("Warning: Creating subtask relationships requires private APIs that may not be stable")
+        print("This feature is not yet implemented due to EventKit limitations")
+        
+        if let childUUID = childUUID {
+            print("Child UUID: \(childUUID)")
+        } else if let childList = childList, let childIndex = childIndex {
+            print("Child: \(childList)[\(childIndex)]")
+        }
+        
+        if let parentUUID = parentUUID {
+            print("Parent UUID: \(parentUUID)")
+        } else if let parentList = parentList, let parentIndex = parentIndex {
+            print("Parent: \(parentList)[\(parentIndex)]")
+        }
+    }
+
     // MARK: - Private functions
 
     private func reminders(
