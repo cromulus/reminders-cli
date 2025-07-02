@@ -4,10 +4,16 @@ API_EXECUTABLE=reminders-api
 ARCHIVE=$(EXECUTABLE).tar.gz
 API_ARCHIVE=$(API_EXECUTABLE).tar.gz
 
-.PHONY: clean build-release package package-api test test-single
+.PHONY: clean build-release build-api run-api package package-api test test-single
 
 build-release:
 	swift build --configuration release -Xswiftc -enable-upcoming-feature -Xswiftc DisableSwift6Isolation --arch arm64 --arch x86_64
+
+build-api:
+	swift build --product $(API_EXECUTABLE) --configuration release -Xswiftc -enable-upcoming-feature -Xswiftc DisableSwift6Isolation --arch arm64 --arch x86_64
+
+run-api: build-api
+	$(RELEASE_BUILD)/$(API_EXECUTABLE)
 
 test:
 	swift test

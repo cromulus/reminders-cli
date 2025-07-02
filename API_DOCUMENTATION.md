@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Reminders CLI HTTP API provides programmatic access to macOS Reminders data through a RESTful interface. Built with Swift and Hummingbird, it offers comprehensive reminder management capabilities including CRUD operations, advanced search, and real-time webhook notifications.
+The Reminders CLI HTTP API provides programmatic access to macOS Reminders data through a RESTful interface. Built with Swift and Hummingbird, it offers comprehensive reminder management capabilities including CRUD operations, advanced search, real-time webhook notifications, and access to private API features like subtasks, URL attachments, and mail links.
 
 ## Getting Started
 
@@ -15,22 +15,31 @@ The Reminders CLI HTTP API provides programmatic access to macOS Reminders data 
 
 1. **Build the API server:**
    ```bash
-   swift build --configuration release -Xswiftc -warnings-as-errors --arch arm64 --arch x86_64
+   # Build just the API server
+   make build-api
+   
+   # Or build everything (CLI + API)
+   make build-release
    ```
 
 2. **Generate API token:**
    ```bash
-   reminders-api --generate-token
+   # Build and generate token
+   make build-api
+   ./.build/apple/Products/Release/reminders-api --generate-token
    ```
 
 3. **Start the server:**
    ```bash
-   # With environment variable
+   # Quick start (builds and runs)
+   make run-api
+   
+   # Or manually with environment variable
    export REMINDERS_API_TOKEN="your-token-here"
-   reminders-api --host 127.0.0.1 --port 8080
+   ./.build/apple/Products/Release/reminders-api --host 127.0.0.1 --port 8080
    
    # Or with command line argument
-   reminders-api --token "your-token-here" --host 127.0.0.1 --port 8080
+   ./.build/apple/Products/Release/reminders-api --token "your-token-here" --host 127.0.0.1 --port 8080
    ```
 
 ### Server Configuration Options
@@ -56,14 +65,15 @@ Authorization: Bearer your-api-token-here
 ### Managing Authentication
 
 #### Configure Authentication Requirements
-```http
-POST /auth/settings
-Content-Type: application/json
-Authorization: Bearer your-token
 
-{
-  "requireAuth": true
-}
+**curl Example:**
+```bash
+curl -X POST "http://localhost:8080/auth/settings" \
+  -H "Authorization: Bearer your-api-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "requireAuth": true
+  }'
 ```
 
 **Response:**
@@ -78,8 +88,11 @@ Authorization: Bearer your-token
 ### Lists Management
 
 #### Get All Lists
-```http
-GET /lists
+
+**curl Example:**
+```bash
+curl "http://localhost:8080/lists" \
+  -H "Authorization: Bearer your-api-token-here"
 ```
 
 **Response:**
@@ -87,40 +100,69 @@ GET /lists
 [
   {
     "title": "Reminders",
-    "calendarIdentifier": "ABC123-DEF456",
-    "type": "Local",
+    "uuid": "ABC123-DEF456-GHI789",
     "allowsContentModifications": true,
-    "isSubscribed": false
+    "type": 0,
+    "source": "Local",
+    "isPrimary": true
+  },
+  {
+    "title": "Work",
+    "uuid": "DEF456-GHI789-JKL012",
+    "allowsContentModifications": true,
+    "type": 0,
+    "source": "Local", 
+    "isPrimary": true
   }
 ]
 ```
 
 #### Get Reminders from Specific List
-```http
-GET /lists/{listName}?completed=false
+
+**curl Examples:**
+```bash
+# Get incomplete reminders from a list by name
+curl "http://localhost:8080/lists/Shopping" \
+  -H "Authorization: Bearer your-api-token-here"
+
+# Get all reminders (including completed) from a list
+curl "http://localhost:8080/lists/Shopping?completed=true" \
+  -H "Authorization: Bearer your-api-token-here"
+
+# Get reminders from a list by UUID
+curl "http://localhost:8080/lists/ABC123-DEF456-GHI789" \
+  -H "Authorization: Bearer your-api-token-here"
 ```
 
 **Parameters:**
-- `listName` (path, required): Name of the list
-- `completed` (query, optional): Include completed reminders (`true`/`false`)
+- `listName` (path, required): Name or UUID of the list
+- `completed` (query, optional): Include completed reminders (`true`/`false`, default: `false`)
 
 **Response:**
 ```json
 [
   {
     "uuid": "ABC123-DEF456-GHI789",
-    "calendarItemIdentifier": "internal-id",
-    "externalId": "x-apple-reminder://ABC123-DEF456-GHI789",
+    "externalId": "ABC123-DEF456-GHI789",
+    "calendarItemIdentifier": "internal-calendar-id",
     "title": "Buy groceries",
     "notes": "Don't forget milk and bread",
+    "url": null,
+    "location": null,
+    "locationTitle": null,
     "dueDate": "2024-01-15T10:00:00Z",
+    "startDate": null,
+    "completionDate": null,
     "isCompleted": false,
-    "priority": 2,
-    "listName": "Shopping",
+    "priority": 5,
+    "list": "Shopping",
     "listUUID": "LIST-UUID-123",
     "creationDate": "2024-01-01T09:00:00Z",
-    "lastModifiedDate": "2024-01-01T09:00:00Z",
-    "completionDate": null
+    "lastModified": "2024-01-01T09:00:00Z",
+    "attachedUrl": "https://example.com/link",
+    "mailUrl": "message://mail-message-id",
+    "parentId": "PARENT-REMINDER-UUID",
+    "isSubtask": true
   }
 ]
 ```
@@ -128,38 +170,62 @@ GET /lists/{listName}?completed=false
 ### Reminder Management
 
 #### Get All Reminders
-```http
-GET /reminders?completed=false
+
+**curl Examples:**
+```bash
+# Get all incomplete reminders across all lists
+curl "http://localhost:8080/reminders" \
+  -H "Authorization: Bearer your-api-token-here"
+
+# Get all reminders including completed ones
+curl "http://localhost:8080/reminders?completed=true" \
+  -H "Authorization: Bearer your-api-token-here"
 ```
 
 **Parameters:**
-- `completed` (query, optional): Include completed reminders (`true`/`false`)
+- `completed` (query, optional): Include completed reminders (`true`/`false`, default: `false`)
+
+**Response:** Array of reminder objects (same structure as list response)
 
 #### Get Specific Reminder
-```http
-GET /reminders/{uuid}
+
+**curl Example:**
+```bash
+curl "http://localhost:8080/reminders/ABC123-DEF456-GHI789" \
+  -H "Authorization: Bearer your-api-token-here"
 ```
 
 **Parameters:**
 - `uuid` (path, required): Reminder UUID
 
-**Response:** Single reminder object (same structure as list response)
+**Response:** Single reminder object
 
 #### Create New Reminder
-```http
-POST /lists/{listName}/reminders
-Content-Type: application/json
 
-{
-  "title": "Buy groceries",
-  "notes": "Don't forget milk and bread",
-  "dueDate": "2024-01-15T10:00:00Z",
-  "priority": "medium"
-}
+**curl Examples:**
+```bash
+# Create a simple reminder
+curl -X POST "http://localhost:8080/lists/Shopping/reminders" \
+  -H "Authorization: Bearer your-api-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Buy groceries"
+  }'
+
+# Create a reminder with all options
+curl -X POST "http://localhost:8080/lists/Shopping/reminders" \
+  -H "Authorization: Bearer your-api-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Buy groceries",
+    "notes": "Don'\''t forget milk and bread",
+    "dueDate": "2024-01-15T10:00:00Z",
+    "priority": "high"
+  }'
 ```
 
 **Parameters:**
-- `listName` (path, required): Name of the target list
+- `listName` (path, required): Name or UUID of the target list
 - `title` (required): Reminder title
 - `notes` (optional): Additional notes
 - `dueDate` (optional): Due date in ISO8601 format
@@ -168,17 +234,28 @@ Content-Type: application/json
 **Response:** Created reminder object (HTTP 201)
 
 #### Update Reminder
-```http
-PATCH /reminders/{uuid}
-Content-Type: application/json
 
-{
-  "title": "Updated title",
-  "notes": "Updated notes",
-  "dueDate": "2024-01-20T14:00:00Z",
-  "priority": "high",
-  "isCompleted": false
-}
+**curl Examples:**
+```bash
+# Update just the title
+curl -X PATCH "http://localhost:8080/reminders/ABC123-DEF456-GHI789" \
+  -H "Authorization: Bearer your-api-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Updated title"
+  }'
+
+# Update multiple fields
+curl -X PATCH "http://localhost:8080/reminders/ABC123-DEF456-GHI789" \
+  -H "Authorization: Bearer your-api-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Updated title",
+    "notes": "Updated notes",
+    "dueDate": "2024-01-20T14:00:00Z",
+    "priority": "high",
+    "isCompleted": false
+  }'
 ```
 
 **Parameters:**
@@ -188,9 +265,16 @@ Content-Type: application/json
 **Response:** Updated reminder object
 
 #### Complete/Uncomplete Reminder
-```http
-PATCH /reminders/{uuid}/complete
-PATCH /reminders/{uuid}/uncomplete
+
+**curl Examples:**
+```bash
+# Mark reminder as complete
+curl -X PATCH "http://localhost:8080/reminders/ABC123-DEF456-GHI789/complete" \
+  -H "Authorization: Bearer your-api-token-here"
+
+# Mark reminder as incomplete
+curl -X PATCH "http://localhost:8080/reminders/ABC123-DEF456-GHI789/uncomplete" \
+  -H "Authorization: Bearer your-api-token-here"
 ```
 
 **Parameters:**
@@ -199,8 +283,11 @@ PATCH /reminders/{uuid}/uncomplete
 **Response:** HTTP 200 on success
 
 #### Delete Reminder
-```http
-DELETE /reminders/{uuid}
+
+**curl Example:**
+```bash
+curl -X DELETE "http://localhost:8080/reminders/ABC123-DEF456-GHI789" \
+  -H "Authorization: Bearer your-api-token-here"
 ```
 
 **Parameters:**
@@ -211,8 +298,24 @@ DELETE /reminders/{uuid}
 ### Advanced Search
 
 #### Search Reminders
-```http
-GET /search?query=groceries&completed=false&priority=high&sortBy=duedate&limit=10
+
+**curl Examples:**
+```bash
+# Basic text search
+curl "http://localhost:8080/search?query=groceries" \
+  -H "Authorization: Bearer your-api-token-here"
+
+# Complex search with multiple filters
+curl "http://localhost:8080/search?query=groceries&completed=false&priority=high&sortBy=dueDate&limit=10" \
+  -H "Authorization: Bearer your-api-token-here"
+
+# Search in specific lists
+curl "http://localhost:8080/search?lists=Work,Personal&priority=high" \
+  -H "Authorization: Bearer your-api-token-here"
+
+# Search by date range
+curl "http://localhost:8080/search?dueAfter=2024-01-01T00:00:00Z&dueBefore=2024-01-31T23:59:59Z" \
+  -H "Authorization: Bearer your-api-token-here"
 ```
 
 **Query Parameters:**
@@ -232,7 +335,7 @@ GET /search?query=groceries&completed=false&priority=high&sortBy=duedate&limit=1
 | `priority` | string | Exact priority (`none`, `low`, `medium`, `high`) |
 | `priorityMin` | integer | Minimum priority level (0-9) |
 | `priorityMax` | integer | Maximum priority level (0-9) |
-| `sortBy` | string | Sort field (`title`, `duedate`, `created`, `modified`, `priority`, `list`) |
+| `sortBy` | string | Sort field (`title`, `dueDate`, `creationDate`, `lastModified`, `priority`, `list`) |
 | `sortOrder` | string | Sort direction (`asc`, `desc`) |
 | `limit` | integer | Maximum results to return |
 
@@ -241,18 +344,27 @@ GET /search?query=groceries&completed=false&priority=high&sortBy=duedate&limit=1
 #### Search Examples
 
 **Find overdue reminders:**
-```http
-GET /search?dueBefore=2024-01-01T00:00:00Z&completed=false
+```bash
+curl "http://localhost:8080/search?dueBefore=2024-01-01T00:00:00Z&completed=false" \
+  -H "Authorization: Bearer your-api-token-here"
 ```
 
 **High priority reminders in specific lists:**
-```http
-GET /search?lists=Work,Personal&priority=high&sortBy=duedate
+```bash
+curl "http://localhost:8080/search?lists=Work,Personal&priority=high&sortBy=dueDate" \
+  -H "Authorization: Bearer your-api-token-here"
 ```
 
-**Recent reminders with notes:**
-```http
-GET /search?hasNotes=true&createdAfter=2024-01-01T00:00:00Z&sortBy=created&sortOrder=desc
+**Find all subtasks:**
+```bash
+curl "http://localhost:8080/search?query=&isSubtask=true" \
+  -H "Authorization: Bearer your-api-token-here"
+```
+
+**Reminders with URL attachments:**
+```bash
+curl "http://localhost:8080/search?hasAttachedUrl=true" \
+  -H "Authorization: Bearer your-api-token-here"
 ```
 
 ## Webhook System
@@ -260,8 +372,11 @@ GET /search?hasNotes=true&createdAfter=2024-01-01T00:00:00Z&sortBy=created&sortO
 ### Webhook Management
 
 #### List All Webhooks
-```http
-GET /webhooks
+
+**curl Example:**
+```bash
+curl "http://localhost:8080/webhooks" \
+  -H "Authorization: Bearer your-api-token-here"
 ```
 
 **Response:**
@@ -274,67 +389,104 @@ GET /webhooks
     "isActive": true,
     "filter": {
       "listNames": ["Work", "Personal"],
+      "listUUIDs": null,
       "completed": "incomplete",
-      "priorityLevels": [2, 3]
+      "priorityLevels": [5, 9],
+      "hasQuery": null
     }
   }
 ]
 ```
 
 #### Get Specific Webhook
-```http
-GET /webhooks/{id}
+
+**curl Example:**
+```bash
+curl "http://localhost:8080/webhooks/webhook-uuid-123" \
+  -H "Authorization: Bearer your-api-token-here"
 ```
 
 #### Create Webhook
-```http
-POST /webhooks
-Content-Type: application/json
 
-{
-  "url": "https://your-server.com/webhook",
-  "name": "Task Notifications",
-  "filter": {
-    "listNames": ["Work", "Personal"],
-    "listUUIDs": ["uuid1", "uuid2"],
-    "completed": "incomplete",
-    "priorityLevels": [2, 3],
-    "hasQuery": "urgent"
-  }
-}
+**curl Examples:**
+```bash
+# Create a simple webhook
+curl -X POST "http://localhost:8080/webhooks" \
+  -H "Authorization: Bearer your-api-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://your-server.com/webhook",
+    "name": "Task Notifications",
+    "filter": {
+      "listNames": ["Work", "Personal"],
+      "completed": "incomplete"
+    }
+  }'
+
+# Create a webhook with complex filtering
+curl -X POST "http://localhost:8080/webhooks" \
+  -H "Authorization: Bearer your-api-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://your-server.com/webhook",
+    "name": "Task Notifications",
+    "filter": {
+      "listNames": ["Work", "Personal"],
+      "listUUIDs": ["uuid1", "uuid2"],
+      "completed": "incomplete",
+      "priorityLevels": [5, 9],
+      "hasQuery": "urgent"
+    }
+  }'
 ```
 
 **Filter Options:**
 - `listNames`: Array of list names to monitor
 - `listUUIDs`: Array of list UUIDs to monitor
 - `completed`: Completion status filter (`all`, `complete`, `incomplete`)
-- `priorityLevels`: Array of priority levels to monitor
+- `priorityLevels`: Array of priority levels to monitor (0-9)
 - `hasQuery`: Text that must be present in title/notes
 
 #### Update Webhook
-```http
-PATCH /webhooks/{id}
-Content-Type: application/json
 
-{
-  "url": "https://new-server.com/webhook",
-  "name": "Updated Notifications",
-  "isActive": false,
-  "filter": {
-    "listNames": ["Work"],
-    "completed": "all"
-  }
-}
+**curl Examples:**
+```bash
+# Update webhook URL and name
+curl -X PATCH "http://localhost:8080/webhooks/webhook-uuid-123" \
+  -H "Authorization: Bearer your-api-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://new-server.com/webhook",
+    "name": "Updated Notifications"
+  }'
+
+# Disable a webhook and update its filter
+curl -X PATCH "http://localhost:8080/webhooks/webhook-uuid-123" \
+  -H "Authorization: Bearer your-api-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "isActive": false,
+    "filter": {
+      "listNames": ["Work"],
+      "completed": "all"
+    }
+  }'
 ```
 
 #### Delete Webhook
-```http
-DELETE /webhooks/{id}
+
+**curl Example:**
+```bash
+curl -X DELETE "http://localhost:8080/webhooks/webhook-uuid-123" \
+  -H "Authorization: Bearer your-api-token-here"
 ```
 
 #### Test Webhook
-```http
-POST /webhooks/{id}/test
+
+**curl Example:**
+```bash
+curl -X POST "http://localhost:8080/webhooks/webhook-uuid-123/test" \
+  -H "Authorization: Bearer your-api-token-here"
 ```
 
 **Response:**
@@ -355,16 +507,20 @@ When events occur, webhooks receive POST requests with this payload structure:
   "timestamp": "2024-01-15T10:30:00Z",
   "reminder": {
     "uuid": "ABC123-DEF456-GHI789",
+    "externalId": "ABC123-DEF456-GHI789",
     "title": "Buy groceries",
     "notes": "Don't forget milk and bread",
     "dueDate": "2024-01-15T10:00:00Z",
     "isCompleted": false,
-    "priority": 2,
-    "listName": "Shopping",
+    "priority": 5,
+    "list": "Shopping",
     "listUUID": "LIST-UUID-123",
     "creationDate": "2024-01-01T09:00:00Z",
-    "lastModifiedDate": "2024-01-01T09:00:00Z",
-    "completionDate": null
+    "lastModified": "2024-01-01T09:00:00Z",
+    "attachedUrl": "https://example.com/link",
+    "mailUrl": "message://mail-message-id",
+    "parentId": "PARENT-REMINDER-UUID",
+    "isSubtask": true
   }
 }
 ```
@@ -383,18 +539,28 @@ When events occur, webhooks receive POST requests with this payload structure:
 ```json
 {
   "uuid": "string",                    // Primary identifier (URL-safe)
+  "externalId": "string",             // Same as uuid (URL-safe version)
   "calendarItemIdentifier": "string",  // Internal macOS identifier
-  "externalId": "string",             // Full Apple reminder URL
   "title": "string",                  // Reminder title
   "notes": "string|null",             // Optional notes
-  "dueDate": "string|null",           // ISO8601 date or null
+  "url": "string|null",               // Standard URL (usually null due to macOS limitations)
+  "location": "string|null",          // GPS coordinates if location reminder
+  "locationTitle": "string|null",     // Location name if location reminder
+  "dueDate": "string|null",           // ISO8601 due date
+  "startDate": "string|null",         // ISO8601 start date
+  "completionDate": "string|null",    // ISO8601 completion date
   "isCompleted": "boolean",           // Completion status
   "priority": "number",               // Priority level (0-9)
-  "listName": "string",               // Name of containing list
+  "list": "string",                   // Name of containing list
   "listUUID": "string",               // UUID of containing list
   "creationDate": "string|null",      // ISO8601 creation date
-  "lastModifiedDate": "string|null",  // ISO8601 last modified
-  "completionDate": "string|null"     // ISO8601 completion date
+  "lastModified": "string|null",      // ISO8601 last modified
+  
+  // Private API Fields (macOS Reminders internal features)
+  "attachedUrl": "string|null",       // URL attachments saved to reminder
+  "mailUrl": "string|null",          // Mail.app message links
+  "parentId": "string|null",         // Parent reminder UUID for subtasks
+  "isSubtask": "boolean"             // Whether this is a subtask
 }
 ```
 
@@ -412,11 +578,48 @@ When events occur, webhooks receive POST requests with this payload structure:
 ```json
 {
   "title": "string",                  // List display name
-  "calendarIdentifier": "string",     // Unique list identifier
-  "type": "string",                   // List type (e.g., "Local")
-  "allowsContentModifications": "boolean",
-  "isSubscribed": "boolean"
+  "uuid": "string",                   // Unique list identifier
+  "allowsContentModifications": "boolean", // Whether list can be modified
+  "type": "number",                   // List type (0 = Local)
+  "source": "string",                 // Source name (e.g., "Local")
+  "isPrimary": "boolean"              // Whether this is a primary list
 }
+```
+
+## Private API Features
+
+This API provides access to private macOS Reminders features not available through the standard EventKit API:
+
+### Subtasks
+- **parentId**: UUID of the parent reminder
+- **isSubtask**: Boolean indicating if this reminder is a subtask
+- Use search with `isSubtask=true` to find all subtasks
+
+### URL Attachments  
+- **attachedUrl**: URLs that have been explicitly attached to reminders
+- Different from the standard `url` field which is typically null
+- These are URLs saved directly in the Reminders app
+
+### Mail Links
+- **mailUrl**: Links to specific Mail.app messages
+- Format: `message://message-id`
+- Created when you create reminders from emails in Mail.app
+
+## Legacy Endpoints (Deprecated)
+
+These endpoints are maintained for backward compatibility but should not be used in new implementations:
+
+```http
+DELETE /lists/{listName}/reminders/{id}
+PATCH /lists/{listName}/reminders/{id}/complete
+PATCH /lists/{listName}/reminders/{id}/uncomplete
+```
+
+Use the UUID-based endpoints instead:
+```http
+DELETE /reminders/{uuid}
+PATCH /reminders/{uuid}/complete
+PATCH /reminders/{uuid}/uncomplete
 ```
 
 ## Error Handling
@@ -468,47 +671,20 @@ When events occur, webhooks receive POST requests with this payload structure:
 }
 ```
 
-## Legacy Endpoints (Deprecated)
-
-These endpoints are maintained for backward compatibility but should not be used in new implementations:
-
-```http
-DELETE /lists/{listName}/reminders/{id}
-PATCH /lists/{listName}/reminders/{id}/complete
-PATCH /lists/{listName}/reminders/{id}/uncomplete
-```
-
-Use the UUID-based endpoints instead:
-```http
-DELETE /reminders/{uuid}
-PATCH /reminders/{uuid}/complete
-PATCH /reminders/{uuid}/uncomplete
-```
-
-## Rate Limiting & Performance
-
-- No explicit rate limiting implemented
-- Webhook delivery timeout: 5 seconds
-- Search operations support pagination via `limit` parameter
-- Concurrent webhook deliveries supported
-- EventKit notifications processed asynchronously
-
-## Security Considerations
-
-- API tokens should be treated as secrets
-- HTTPS recommended for production deployments
-- CORS enabled for web applications
-- Webhook URLs should use HTTPS
-- No rate limiting - implement at reverse proxy level if needed
-
 ## Integration Examples
 
-### cURL Examples
+### Complete cURL Examples
+
+**Get all lists:**
+```bash
+curl "http://localhost:8080/lists" \
+  -H "Authorization: Bearer your-api-token-here"
+```
 
 **Create a reminder:**
 ```bash
 curl -X POST "http://localhost:8080/lists/Shopping/reminders" \
-  -H "Authorization: Bearer your-token" \
+  -H "Authorization: Bearer your-api-token-here" \
   -H "Content-Type: application/json" \
   -d '{
     "title": "Buy groceries",
@@ -518,10 +694,49 @@ curl -X POST "http://localhost:8080/lists/Shopping/reminders" \
   }'
 ```
 
-**Search for overdue reminders:**
+**Get a specific reminder:**
 ```bash
-curl "http://localhost:8080/search?dueBefore=2024-01-01T00:00:00Z&completed=false" \
-  -H "Authorization: Bearer your-token"
+curl "http://localhost:8080/reminders/ABC123-DEF456-GHI789" \
+  -H "Authorization: Bearer your-api-token-here"
+```
+
+**Update a reminder:**
+```bash
+curl -X PATCH "http://localhost:8080/reminders/ABC123-DEF456-GHI789" \
+  -H "Authorization: Bearer your-api-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Updated title",
+    "priority": "high"
+  }'
+```
+
+**Search for subtasks:**
+```bash
+curl "http://localhost:8080/search?isSubtask=true" \
+  -H "Authorization: Bearer your-api-token-here"
+```
+
+**Find reminders with URL attachments:**
+```bash
+curl "http://localhost:8080/search?hasAttachedUrl=true" \
+  -H "Authorization: Bearer your-api-token-here"
+```
+
+**Create a webhook:**
+```bash
+curl -X POST "http://localhost:8080/webhooks" \
+  -H "Authorization: Bearer your-api-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://your-webhook-endpoint.com/webhook",
+    "name": "High priority work reminders",
+    "filter": {
+      "listNames": ["Work"],
+      "priorityLevels": [5, 9],
+      "completed": "incomplete"
+    }
+  }'
 ```
 
 ### JavaScript Example
@@ -550,6 +765,20 @@ async function createReminder(listName, title, options = {}) {
   return response.json();
 }
 
+async function findSubtasks() {
+  const response = await fetch(`${API_BASE}/search?isSubtask=true`, {
+    headers: {
+      'Authorization': `Bearer ${API_TOKEN}`
+    }
+  });
+  
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
+  
+  return response.json();
+}
+
 // Usage
 createReminder('Shopping', 'Buy groceries', {
   notes: 'Milk, bread, eggs',
@@ -557,6 +786,8 @@ createReminder('Shopping', 'Buy groceries', {
   priority: 'medium'
 }).then(reminder => {
   console.log('Created reminder:', reminder.uuid);
+  console.log('Has URL attachment:', reminder.attachedUrl ? 'Yes' : 'No');
+  console.log('Is subtask:', reminder.isSubtask ? 'Yes' : 'No');
 });
 ```
 
@@ -595,6 +826,14 @@ class RemindersAPI:
         )
         response.raise_for_status()
         return response.json()
+    
+    def find_subtasks(self):
+        """Find all subtask reminders"""
+        return self.search_reminders(isSubtask=True)
+    
+    def find_reminders_with_urls(self):
+        """Find reminders with URL attachments"""
+        return self.search_reminders(hasAttachedUrl=True)
 
 # Usage
 api = RemindersAPI(token="your-token-here")
@@ -608,13 +847,94 @@ reminder = api.create_reminder(
     priority="medium"
 )
 
-# Search reminders
-results = api.search_reminders(
-    query="groceries",
-    completed="false",
-    sortBy="duedate"
-)
+print(f"Created: {reminder['title']} ({reminder['uuid']})")
+print(f"URL attachment: {reminder.get('attachedUrl', 'None')}")
+print(f"Is subtask: {reminder['isSubtask']}")
+
+# Search for subtasks
+subtasks = api.find_subtasks()
+print(f"Found {len(subtasks)} subtasks")
+
+# Search for reminders with URLs
+url_reminders = api.find_reminders_with_urls()
+print(f"Found {len(url_reminders)} reminders with URL attachments")
 ```
+
+## OpenAPI Specification
+
+While this API doesn't automatically generate OpenAPI specs, you can create one based on this documentation. Here's the basic structure:
+
+### Manual OpenAPI Generation
+
+**Basic OpenAPI 3.0 spec structure:**
+```yaml
+openapi: 3.0.0
+info:
+  title: Reminders CLI API
+  description: REST API for macOS Reminders with private API features
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    Reminder:
+      type: object
+      properties:
+        uuid:
+          type: string
+        title:
+          type: string
+        notes:
+          type: string
+          nullable: true
+        isCompleted:
+          type: boolean
+        priority:
+          type: integer
+        attachedUrl:
+          type: string
+          nullable: true
+        mailUrl:
+          type: string
+          nullable: true
+        parentId:
+          type: string
+          nullable: true
+        isSubtask:
+          type: boolean
+paths:
+  /lists:
+    get:
+      summary: Get all reminder lists
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of reminder lists
+```
+
+### Automated OpenAPI Generation
+
+To add automated OpenAPI spec generation to the server, you could:
+
+1. **Add OpenAPI generation dependency to Package.swift:**
+```swift
+.package(url: "https://github.com/mattpolzin/OpenAPIKit.git", from: "2.0.0")
+```
+
+2. **Add OpenAPI endpoint:**
+```bash
+# This would require code changes to generate spec automatically
+curl "http://localhost:8080/openapi.json" \
+  -H "Authorization: Bearer your-api-token-here"
+```
+
+*Note: Automatic OpenAPI generation would require additional implementation in the server code.*
 
 ## Troubleshooting
 
@@ -625,12 +945,28 @@ results = api.search_reminders(
 3. **List Not Found**: Check exact list name spelling and case sensitivity
 4. **Webhook Delivery Failures**: Ensure webhook URL is accessible and returns 2xx status
 5. **Date Format Issues**: Use ISO8601 format for all dates
+6. **Private API Fields Empty**: These fields are only populated when reminders have the corresponding data
 
 ### Debug Mode
 
 Start server with verbose logging:
 ```bash
-REMINDERS_API_DEBUG=1 reminders-api --token your-token
+# Build and run with debug environment variable
+make build-api
+REMINDERS_API_DEBUG=1 ./.build/apple/Products/Release/reminders-api --token your-token
+```
+
+### Quick Commands
+
+```bash
+# Build just the API server
+make build-api
+
+# Build and run the API server immediately  
+make run-api
+
+# Clean and rebuild everything
+make clean && make build-api
 ```
 
 ### Testing Webhooks
@@ -640,3 +976,20 @@ Use tools like ngrok for local webhook testing:
 ngrok http 3000
 # Use the ngrok URL as your webhook endpoint
 ```
+
+## Rate Limiting & Performance
+
+- No explicit rate limiting implemented
+- Webhook delivery timeout: 5 seconds
+- Search operations support pagination via `limit` parameter
+- Concurrent webhook deliveries supported
+- EventKit notifications processed asynchronously
+
+## Security Considerations
+
+- API tokens should be treated as secrets
+- HTTPS recommended for production deployments
+- CORS enabled for web applications
+- Webhook URLs should use HTTPS
+- No rate limiting - implement at reverse proxy level if needed
+- Private API fields may contain sensitive information (URLs, email references)
