@@ -168,7 +168,7 @@ The server runs on `localhost:8080` by default. The first time you run it, you'l
 
 ### Authentication
 
-The API server supports token-based authentication, which is optional by default but can be required for all endpoints.
+The API server supports **optional token-based authentication** by default, which can be configured as required or completely disabled.
 
 #### Setting up authentication
 
@@ -183,6 +183,9 @@ The API server supports token-based authentication, which is optional by default
 
 2. Start the server with the token:
    ```bash
+   # Default: authentication optional
+   $ reminders-api
+   
    # Using environment variable:
    $ REMINDERS_API_TOKEN=abc123def456... reminders-api
    
@@ -191,6 +194,12 @@ The API server supports token-based authentication, which is optional by default
    
    # To require authentication for all endpoints:
    $ reminders-api --token abc123def456... --auth-required
+   
+   # To explicitly disable authentication:
+   $ reminders-api --no-auth
+   
+   # Enable debug logging:
+   $ reminders-api --log-level DEBUG
    ```
 
 3. Authenticate requests using the Bearer token:
@@ -202,16 +211,23 @@ The API server supports token-based authentication, which is optional by default
 
 ```bash
 $ reminders-api --help
-USAGE: reminders-api [--host <host>] [--port <port>] [--token <token>] [--auth-required] [--generate-token]
+USAGE: reminders-api [--host <host>] [--port <port>] [--token <token>] [--auth-required] [--no-auth] [--log-level <level>] [--generate-token]
 
 OPTIONS:
   --host <host>           The hostname to bind to (default: 127.0.0.1)
   -p, --port <port>       The port to listen on (default: 8080)
   --token <token>         API authentication token (overrides REMINDERS_API_TOKEN environment variable)
   --auth-required         Require authentication for all API endpoints
+  --no-auth               Explicitly disable authentication (overrides config file)
+  --log-level <level>     Set log level: DEBUG, INFO, WARN, ERROR (default: INFO)
   --generate-token        Generate a new API token and exit
   -h, --help              Show help information.
 ```
+
+#### Environment Variables
+
+- `REMINDERS_API_TOKEN`: API authentication token
+- `LOG_LEVEL`: Log level (DEBUG, INFO, WARN, ERROR)
 
 ### API Endpoints
 

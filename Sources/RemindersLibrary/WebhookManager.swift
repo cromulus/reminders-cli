@@ -225,6 +225,8 @@ public class WebhookManager {
         // Set config file path
         self.configURL = remindersDirectory.appendingPathComponent("webhooks.json")
         
+        Logger.shared.debug("WebhookManager initialized with config at: \(configURL.path)")
+        
         // Load existing configurations
         loadConfigurations()
         
@@ -235,6 +237,8 @@ public class WebhookManager {
             name: NSNotification.Name.EKEventStoreChanged,
             object: remindersService.store
         )
+        
+        Logger.shared.info("WebhookManager registered for EventKit notifications")
         
         // Initialize previous reminders state
         updatePreviousRemindersState()
@@ -250,15 +254,18 @@ public class WebhookManager {
         let config = WebhookConfig(url: url, filter: filter, name: name)
         webhooks.append(config)
         saveConfigurations()
+        Logger.shared.info("Added webhook: \(name) -> \(url)")
         return config
     }
     
     public func updateWebhook(id: UUID, isActive: Bool? = nil, filter: WebhookFilter? = nil, url: URL? = nil, name: String? = nil) -> Bool {
         guard let index = webhooks.firstIndex(where: { $0.id == id }) else {
+            Logger.shared.warn("Attempted to update non-existent webhook: \(id)")
             return false
         }
         
         var config = webhooks[index]
+        Logger.shared.debug("Updating webhook: \(config.name)")
         
         if let isActive = isActive {
             config.isActive = isActive
@@ -295,16 +302,24 @@ public class WebhookManager {
         }
         
         saveConfigurations()
+        Logger.shared.info("Updated webhook: \(webhooks[index].name)")
         return true
     }
     
     public func removeWebhook(id: UUID) -> Bool {
         let initialCount = webhooks.count
+        if let webhook = webhooks.first(where: { $0.id == id }) {
+            Logger.shared.info("Removing webhook: \(webhook.name)")
+        }
+        
         webhooks.removeAll { $0.id == id }
         let removed = initialCount != webhooks.count
         
         if removed {
             saveConfigurations()
+            Logger.shared.debug("Webhook removed successfully")
+        } else {
+            Logger.shared.warn("Attempted to remove non-existent webhook: \(id)")
         }
         
         return removed

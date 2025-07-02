@@ -24,13 +24,26 @@ struct Configuration: ParsableCommand {
     @Option(name: [.customLong("token")], help: "API authentication token (overrides REMINDERS_API_TOKEN environment variable)")
     var token: String?
     
+    @Option(name: [.customLong("log-level")], help: "Set log level (DEBUG, INFO, WARN, ERROR)")
+    var logLevel: String?
+    
     @Flag(name: [.customLong("auth-required")], help: "Require authentication for all API endpoints")
     var requireAuth = false
+    
+    @Flag(name: [.customLong("no-auth")], help: "Explicitly disable authentication (overrides config file and other settings)")
+    var noAuth = false
     
     @Flag(name: [.customLong("generate-token")], help: "Generate a new API token and exit")
     var generateToken = false
     
     func run() throws {
+        // Set up logging first
+        if let logLevelString = logLevel ?? ProcessInfo.processInfo.environment["LOG_LEVEL"],
+           let level = LogLevel(string: logLevelString) {
+            Logger.shared.setLevel(level)
+            Logger.shared.info("Log level set to \(level.rawValue)")
+        }
+        
         // Handle token generation mode
         if generateToken {
             let authManager = AuthManager()
@@ -46,15 +59,27 @@ struct Configuration: ParsableCommand {
         // 1. Command line argument
         // 2. Environment variable
         let apiToken = token ?? ProcessInfo.processInfo.environment["REMINDERS_API_TOKEN"]
+        Logger.shared.info("API token configuration: \(apiToken != nil ? "provided" : "not provided")")
+        
+        // Determine authentication requirement with precedence:
+        // 1. --no-auth flag (disables auth completely)
+        // 2. --auth-required flag (enables auth)
+        // 3. Default to false (no auth required)
+        let finalRequireAuth = noAuth ? false : requireAuth
+        Logger.shared.info("Authentication requirement: \(finalRequireAuth ? "REQUIRED" : "OPTIONAL")")
         
         // Check if reminders access is granted before starting server
+        Logger.shared.info("Requesting Reminders access...")
         switch Reminders.requestAccess() {
         case (true, _):
+            Logger.shared.info("Reminders access granted. Starting API server...")
             print("Reminders access granted. Starting API server...")
-            startServer(hostname: hostname, port: port, token: apiToken, requireAuth: requireAuth)
+            startServer(hostname: hostname, port: port, token: apiToken, requireAuth: finalRequireAuth)
         case (false, let error):
+            Logger.shared.error("Reminders access denied")
             print("Error: You need to grant reminders access to use the API server")
             if let error {
+                Logger.shared.error("Reminders access error: \(error.localizedDescription)")
                 print("Error: \(error.localizedDescription)")
             }
             Foundation.exit(1)
@@ -70,9 +95,13 @@ struct WebhookTestResponse: Codable {
 
 // Initialize and start the server
 func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool) {
+    Logger.shared.info("Initializing server components...")
+    
     let remindersService = Reminders()
     let webhookManager = WebhookManager(remindersService: remindersService)
     let authManager = AuthManager(token: token, requireAuth: requireAuth)
+    
+    Logger.shared.debug("Creating Hummingbird application...")
     
     // Create application with the provided hostname and port
     let app = HBApplication(configuration: .init(
@@ -82,11 +111,13 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
     
     // Set auth required status on the application
     app.authRequired = authManager.isAuthRequired
+    Logger.shared.debug("Application auth requirement set to: \(authManager.isAuthRequired)")
     
     // Middleware for JSON response encoding
     let jsonEncoder = JSONEncoder()
     jsonEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     app.encoder = jsonEncoder
+    Logger.shared.debug("JSON encoder configured")
     
     // Add CORS middleware
     app.middleware.add(
@@ -96,9 +127,11 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
             allowMethods: [.GET, .POST, .PUT, .DELETE, .PATCH]
         )
     )
+    Logger.shared.debug("CORS middleware added")
     
     // Add token authentication middleware
-    app.middleware.add(TokenAuthMiddleware(authManager: authManager))
+    app.middleware.add(TokenAuthMiddleware(authManager: authManager, requireAuth: requireAuth))
+    Logger.shared.debug("Token authentication middleware added")
     
     // Define middleware to check authentication for all routes
     struct AuthCheckMiddleware: HBMiddleware {
@@ -106,15 +139,18 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
             // Check if global auth is required
             let requireAuth = request.application.requireAuth
             if requireAuth && !request.isAuthenticated {
+                Logger.shared.warn("Request \(request.method) \(request.uri.path) - authentication required but not provided")
                 return request.failure(.unauthorized, message: "Authentication required")
             }
             
+            Logger.shared.debug("Request \(request.method) \(request.uri.path) - auth check passed")
             return next.respond(to: request)
         }
     }
     
     // Add auth check middleware
     app.middleware.add(AuthCheckMiddleware())
+    Logger.shared.debug("Auth check middleware added")
     
     // MARK: - Authentication Settings Routes
     
@@ -150,7 +186,9 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
     
     // GET /lists - Get all reminder lists
     app.router.get("lists") { request -> HBResponse in
+        Logger.shared.info("Fetching all reminder lists")
         let lists = remindersService.getCalendars()
+        Logger.shared.debug("Found \(lists.count) reminder lists")
         let jsonEncoder = JSONEncoder()
         jsonEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let listsData = try jsonEncoder.encode(lists)
@@ -160,24 +198,37 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
     // GET /lists/:name - Get reminders from a specific list
     app.router.get("lists/:name") { request -> HBResponse in
         guard let listName = request.parameters.get("name") else {
+            Logger.shared.warn("Missing list name parameter in request")
             throw HBHTTPError(.badRequest, message: "Missing list name")
         }
         
+        Logger.shared.info("Fetching reminders from list: \(listName)")
+        
         let displayOptions = request.uri.queryParameters.get("completed") == "true" ? 
             DisplayOptions.all : DisplayOptions.incomplete
+        Logger.shared.debug("Display options: \(displayOptions)")
             
         let reminders = try await fetchReminders(from: listName, displayOptions: displayOptions, remindersService: remindersService)
-        let reminderData = try JSONEncoder().encode(reminders)
+        Logger.shared.debug("Found \(reminders.count) reminders in list \(listName)")
+        let jsonEncoder = JSONEncoder()
+        jsonEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let reminderData = try jsonEncoder.encode(reminders)
         return HBResponse(status: .ok, headers: ["content-type": "application/json"], body: .byteBuffer(ByteBuffer(data: reminderData)))
     }
     
     // GET /reminders - Get all reminders across all lists
     app.router.get("reminders") { request -> HBResponse in
+        Logger.shared.info("Fetching all reminders across all lists")
+        
         let displayOptions = request.uri.queryParameters.get("completed") == "true" ? 
             DisplayOptions.all : DisplayOptions.incomplete
+        Logger.shared.debug("Display options: \(displayOptions)")
             
         let reminders = try await fetchAllReminders(displayOptions: displayOptions, remindersService: remindersService)
-        let reminderData = try JSONEncoder().encode(reminders)
+        Logger.shared.debug("Found \(reminders.count) total reminders")
+        let jsonEncoder = JSONEncoder()
+        jsonEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let reminderData = try jsonEncoder.encode(reminders)
         return HBResponse(status: .ok, headers: ["content-type": "application/json"], body: .byteBuffer(ByteBuffer(data: reminderData)))
     }
     
@@ -185,8 +236,11 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
     app.router.post("lists/:name/reminders") { request -> HBResponse in
         
         guard let listName = request.parameters.get("name") else {
+            Logger.shared.warn("Missing list name parameter in POST request")
             throw HBHTTPError(.badRequest, message: "Missing list name")
         }
+        
+        Logger.shared.info("Creating new reminder in list: \(listName)")
         
         struct ReminderRequest: Decodable {
             let title: String
@@ -196,6 +250,7 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
         }
         
         let reminderRequest = try request.decode(as: ReminderRequest.self)
+        Logger.shared.debug("New reminder title: \(reminderRequest.title)")
         
         var dueDateComponents: DateComponents? = nil
         if let dueDateString = reminderRequest.dueDate {
@@ -203,10 +258,14 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
             formatter.formatOptions = [.withInternetDateTime]
             if let date = formatter.date(from: dueDateString) {
                 dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+                Logger.shared.debug("Due date parsed: \(dueDateString)")
+            } else {
+                Logger.shared.warn("Failed to parse due date: \(dueDateString)")
             }
         }
         
         let priority = reminderRequest.priority.flatMap { Priority(rawValue: $0) } ?? .none
+        Logger.shared.debug("Priority set to: \(priority)")
         
         let reminder = try await addReminder(
             title: reminderRequest.title,
@@ -217,7 +276,10 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
             remindersService: remindersService
         )
         
-        let reminderData = try JSONEncoder().encode(reminder)
+        Logger.shared.info("Successfully created reminder: \(reminderRequest.title)")
+        let jsonEncoder = JSONEncoder()
+        jsonEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let reminderData = try jsonEncoder.encode(reminder)
         return HBResponse(status: .created, headers: ["content-type": "application/json"], body: .byteBuffer(ByteBuffer(data: reminderData)))
     }
     
@@ -594,15 +656,11 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
         let testReminders = try await fetchAllReminders(displayOptions: .all, remindersService: remindersService)
         
         // Find a reminder that matches the webhook filter
-        let matchingReminder = testReminders.first { reminderWrapper in
-            guard let reminder = remindersService.getReminderByUUID(reminderWrapper.uuid) else {
-                return false
-            }
+        let matchingReminder = testReminders.first { reminder in
             return webhook.filter.matches(reminder: reminder, remindersService: remindersService)
         }
         
-        if let reminderWrapper = matchingReminder,
-           let reminder = remindersService.getReminderByUUID(reminderWrapper.uuid) {
+        if let reminder = matchingReminder {
             // Create a test payload with a special "test" event
             let payload = WebhookPayload(event: .updated, reminder: reminder)
             
@@ -670,15 +728,54 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
     
     // Authentication is handled by AuthCheckMiddleware
     
-    // Print server information
-    let tokenStatus = token != nil ? "configured" : "not configured"
-    let authStatus = requireAuth ? "required" : "optional"
+    // Get config file location for display
+    let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+    let configDirectory = appSupportURL.appendingPathComponent("reminders-cli", isDirectory: true)
+    let authConfigPath = configDirectory.appendingPathComponent("auth_config.json").path
+    let webhookConfigPath = configDirectory.appendingPathComponent("webhooks.json").path
     
-    print("RemindersAPI server starting on http://\(hostname):\(port) with webhook support")
-    print("API token: \(tokenStatus)")
-    print("Authentication: \(authStatus)")
-    print("Set API token using --token option or REMINDERS_API_TOKEN environment variable")
-    print("Generate a new token with: reminders-api --generate-token")
+    // Get registered webhooks
+    let webhooks = webhookManager.getWebhooks()
+    
+    // Print enhanced server information
+    print("=====================================")
+    print("RemindersAPI Server Starting")
+    print("=====================================")
+    print("Server URL: http://\(hostname):\(port)")
+    print("Authentication: \(requireAuth ? "REQUIRED" : "OPTIONAL")")
+    print("Log Level: \(Logger.shared.level.rawValue)")
+    
+    if let token = token {
+        print("API Token: \(token)")
+    } else {
+        print("API Token: Not configured")
+    }
+    
+    print("Auth Config: \(authConfigPath)")
+    print("Webhook Config: \(webhookConfigPath)")
+    
+    if webhooks.isEmpty {
+        print("Registered Webhooks: None")
+    } else {
+        print("Registered Webhooks: \(webhooks.count)")
+        for webhook in webhooks {
+            let status = webhook.isActive ? "ACTIVE" : "INACTIVE"
+            print("  - \(webhook.name): \(webhook.url) [\(status)]")
+        }
+    }
+    
+    print("=====================================")
+    print("Usage:")
+    print("  Generate token: reminders-api --generate-token")
+    print("  Require auth: reminders-api --auth-required")
+    print("  Disable auth: reminders-api --no-auth")
+    print("  Set token: reminders-api --token YOUR_TOKEN")
+    print("  Set log level: reminders-api --log-level DEBUG")
+    print("  Environment: REMINDERS_API_TOKEN=YOUR_TOKEN reminders-api")
+    print("  Environment: LOG_LEVEL=DEBUG reminders-api")
+    print("=====================================")
+    
+    Logger.shared.info("Starting Hummingbird server...")
     
     // Run the application
     try! app.start()
@@ -688,32 +785,30 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
 }
 
 // Helper function to fetch reminders from a specific list
-func fetchReminders(from listName: String, displayOptions: DisplayOptions, remindersService: Reminders) async throws -> [EKReminderWrapper] {
+func fetchReminders(from listName: String, displayOptions: DisplayOptions, remindersService: Reminders) async throws -> [EKReminder] {
     return try await withCheckedThrowingContinuation { continuation in
         let calendar = remindersService.calendar(withName: listName)
         
         remindersService.reminders(on: [calendar], displayOptions: displayOptions) { reminders in
-            let wrappedReminders = reminders.map { EKReminderWrapper(reminder: $0) }
-            continuation.resume(returning: wrappedReminders)
+            continuation.resume(returning: reminders)
         }
     }
 }
 
 // Helper function to fetch all reminders
-func fetchAllReminders(displayOptions: DisplayOptions, remindersService: Reminders) async throws -> [EKReminderWrapper] {
+func fetchAllReminders(displayOptions: DisplayOptions, remindersService: Reminders) async throws -> [EKReminder] {
     return try await withCheckedThrowingContinuation { continuation in
         let calendars = remindersService.getCalendars()
         
         remindersService.reminders(on: calendars, displayOptions: displayOptions) { reminders in
-            let wrappedReminders = reminders.map { EKReminderWrapper(reminder: $0) }
-            continuation.resume(returning: wrappedReminders)
+            continuation.resume(returning: reminders)
         }
     }
 }
 
 // Helper function to add a reminder
 func addReminder(title: String, notes: String?, listName: String, dueDateComponents: DateComponents?, 
-                priority: Priority, remindersService: Reminders) async throws -> EKReminderWrapper {
+                priority: Priority, remindersService: Reminders) async throws -> EKReminder {
     return try await withCheckedThrowingContinuation { continuation in
         let calendar = remindersService.calendar(withName: listName)
         let reminder = remindersService.createReminder(
@@ -724,7 +819,7 @@ func addReminder(title: String, notes: String?, listName: String, dueDateCompone
             priority: priority
         )
         
-        continuation.resume(returning: EKReminderWrapper(reminder: reminder))
+        continuation.resume(returning: reminder)
     }
 }
 
@@ -798,80 +893,6 @@ func setReminderComplete(id: String, listName: String, complete: Bool, reminders
             }
             
             continuation.resume(throwing: HBHTTPError(.notFound, message: "Reminder not found"))
-        }
-    }
-}
-
-// Wrapper struct for EKReminder to provide Codable support
-struct EKReminderWrapper: Encodable, HBResponseGenerator {
-    // UUID is the primary identifier for all operations
-    let uuid: String
-    // Secondary identifiers for advanced usage
-    let calendarItemIdentifier: String
-    let externalId: String
-    
-    // Basic reminder data
-    let title: String
-    let notes: String?
-    let dueDate: String?
-    let isCompleted: Bool
-    let priority: Int
-    
-    // List information, including the list UUID for cross-reference
-    let listName: String
-    let listUUID: String
-    
-    // Timestamps
-    let creationDate: String?
-    let lastModifiedDate: String?
-    let completionDate: String?
-    
-    // Implement HBResponseGenerator protocol
-    func response(from request: HBRequest) throws -> HBResponse {
-        let data = try JSONEncoder().encode(self)
-        return HBResponse(
-            status: .ok,
-            headers: ["content-type": "application/json"],
-            body: .byteBuffer(ByteBuffer(data: data))
-        )
-    }
-    
-    init(reminder: EKReminder) {
-        self.uuid = reminder.calendarItemExternalIdentifier
-        self.calendarItemIdentifier = reminder.calendarItemIdentifier
-        self.externalId = reminder.calendarItemExternalIdentifier
-        self.title = reminder.title ?? "<unknown>"
-        self.notes = reminder.notes
-        self.isCompleted = reminder.isCompleted
-        self.priority = reminder.priority
-        self.listName = reminder.calendar.title
-        self.listUUID = reminder.calendar.calendarIdentifier
-        
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        
-        if let date = reminder.dueDateComponents?.date {
-            self.dueDate = formatter.string(from: date)
-        } else {
-            self.dueDate = nil
-        }
-        
-        if let date = reminder.creationDate {
-            self.creationDate = formatter.string(from: date)
-        } else {
-            self.creationDate = nil
-        }
-        
-        if let date = reminder.lastModifiedDate {
-            self.lastModifiedDate = formatter.string(from: date)
-        } else {
-            self.lastModifiedDate = nil
-        }
-        
-        if let date = reminder.completionDate {
-            self.completionDate = formatter.string(from: date)
-        } else {
-            self.completionDate = nil
         }
     }
 }
@@ -965,7 +986,7 @@ func parseSearchParameters(_ request: HBRequest) -> SearchParameters {
 }
 
 // Search reminders based on provided parameters
-func searchReminders(params: SearchParameters, remindersService: Reminders) async throws -> [EKReminderWrapper] {
+func searchReminders(params: SearchParameters, remindersService: Reminders) async throws -> [EKReminder] {
     return try await withCheckedThrowingContinuation { continuation in
         // Determine which calendars to search
         var calendarsToSearch: [EKCalendar] = []
@@ -1171,9 +1192,8 @@ func searchReminders(params: SearchParameters, remindersService: Reminders) asyn
                 filteredReminders = Array(filteredReminders.prefix(limit))
             }
             
-            // Map to wrapper objects and return
-            let wrappedReminders = filteredReminders.map { EKReminderWrapper(reminder: $0) }
-            continuation.resume(returning: wrappedReminders)
+            // Return the filtered reminders directly using EKReminder+Encodable
+            continuation.resume(returning: filteredReminders)
         }
     }
 }

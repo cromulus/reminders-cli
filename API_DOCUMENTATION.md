@@ -34,12 +34,25 @@ The Reminders CLI HTTP API provides programmatic access to macOS Reminders data 
    # Quick start (builds and runs)
    make run-api
    
-   # Or manually with environment variable
-   export REMINDERS_API_TOKEN="your-token-here"
-   ./.build/apple/Products/Release/reminders-api --host 127.0.0.1 --port 8080
+   # Default: authentication optional, INFO logging
+   ./.build/apple/Products/Release/reminders-api
    
-   # Or with command line argument
-   ./.build/apple/Products/Release/reminders-api --token "your-token-here" --host 127.0.0.1 --port 8080
+   # With token (authentication still optional unless required)
+   ./.build/apple/Products/Release/reminders-api --token "your-token-here"
+   
+   # Require authentication for all endpoints
+   ./.build/apple/Products/Release/reminders-api --token "your-token-here" --auth-required
+   
+   # Explicitly disable authentication
+   ./.build/apple/Products/Release/reminders-api --no-auth
+   
+   # Enable debug logging
+   ./.build/apple/Products/Release/reminders-api --log-level DEBUG
+   
+   # Using environment variables
+   export REMINDERS_API_TOKEN="your-token-here"
+   export LOG_LEVEL="DEBUG"
+   ./.build/apple/Products/Release/reminders-api --host 127.0.0.1 --port 8080
    ```
 
 ### Server Configuration Options
@@ -50,16 +63,53 @@ The Reminders CLI HTTP API provides programmatic access to macOS Reminders data 
 | `--port` | Port to listen on | `8080` |
 | `--token` | API authentication token | Environment variable |
 | `--auth-required` | Require authentication for all endpoints | `false` |
+| `--no-auth` | Explicitly disable authentication (overrides config file) | `false` |
+| `--log-level` | Set log level (DEBUG, INFO, WARN, ERROR) | `INFO` |
 | `--generate-token` | Generate new token and exit | - |
+
+### Environment Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `REMINDERS_API_TOKEN` | API authentication token | `abc123def456...` |
+| `LOG_LEVEL` | Set log level (alternative to --log-level) | `DEBUG` |
 
 ## Authentication
 
+The API server supports **optional token-based authentication** by default. Authentication can be configured in several ways:
+
+### Authentication Modes
+
+1. **Optional (default)**: Authentication is not required, but can be provided
+2. **Required**: All endpoints require valid authentication  
+3. **Disabled**: Authentication is completely disabled
+
 ### Token-Based Authentication
 
-The API uses Bearer token authentication. Include the token in the Authorization header:
+When authentication is enabled, the API uses Bearer token authentication. Include the token in the Authorization header:
 
 ```http
 Authorization: Bearer your-api-token-here
+```
+
+### Authentication Configuration Examples
+
+```bash
+# Default: Authentication optional
+reminders-api
+
+# Provide token (still optional unless --auth-required)
+reminders-api --token "your-token-here"
+
+# Require authentication for all endpoints
+reminders-api --token "your-token-here" --auth-required
+
+# Explicitly disable authentication (overrides config file)
+reminders-api --no-auth
+
+# Environment variable approach
+export REMINDERS_API_TOKEN="your-token-here"
+reminders-api --auth-required
 ```
 
 ### Managing Authentication
@@ -81,6 +131,62 @@ curl -X POST "http://localhost:8080/auth/settings" \
 {
   "message": "Authentication settings updated. Required: true"
 }
+```
+
+## Logging
+
+The API server includes comprehensive logging with configurable levels:
+
+### Log Levels
+
+- **DEBUG**: Detailed information for debugging (requests, auth attempts, etc.)
+- **INFO**: General information about server operations (default)
+- **WARN**: Warning messages for potentially problematic situations
+- **ERROR**: Error messages for failures
+
+### Log Configuration
+
+```bash
+# Set log level via command line
+reminders-api --log-level DEBUG
+
+# Set log level via environment variable
+export LOG_LEVEL=DEBUG
+reminders-api
+
+# Example debug output
+[2025-07-02T17:08:00Z] [DEBUG] [main.swift:44] Log level set to DEBUG
+[2025-07-02T17:08:00Z] [INFO] [AuthManager.swift:45] AuthManager initialized
+[2025-07-02T17:08:00Z] [DEBUG] [main.swift:123] Request GET /reminders - auth check passed
+[2025-07-02T17:08:00Z] [INFO] [main.swift:156] Fetching all reminders across all lists
+```
+
+### Startup Information
+
+The server displays comprehensive startup information including:
+
+- Server URL and authentication status
+- API token configuration  
+- Log level
+- Config file locations
+- Registered webhooks
+- Usage examples
+
+Example startup output:
+```
+=====================================
+RemindersAPI Server Starting
+=====================================
+Server URL: http://127.0.0.1:8080
+Authentication: OPTIONAL
+Log Level: INFO
+API Token: abc123def456...
+Auth Config: /Users/user/Library/Application Support/reminders-cli/auth_config.json
+Webhook Config: /Users/user/Library/Application Support/reminders-cli/webhooks.json
+Registered Webhooks: 2
+  - Shopping Alerts: https://example.com/webhook [ACTIVE]
+  - Work Notifications: https://api.slack.com/webhook [INACTIVE]
+=====================================
 ```
 
 ## Core API Endpoints
