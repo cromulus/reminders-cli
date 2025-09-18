@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.reminders.api</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>REMINDERS_API_PATH</string>
+        <string>--auth-required</string>
+        <string>--token</string>
+        <string>REMINDERS_API_TOKEN</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>8080</string>
+    </array>
+
+    <!-- CRITICAL: Run in GUI session for TCC permissions -->
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+
+    <!-- CRITICAL: Set working directory -->
+    <key>WorkingDirectory</key>
+    <string>REMINDERS_API_HOME</string>
+
+    <!-- CRITICAL: Set environment variables with proper PATH -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>REMINDERS_API_HOME</string>
+        <key>USER</key>
+        <string>REMINDERS_API_USER</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>LANG</key>
+        <string>en_US.UTF-8</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- CRITICAL: Logs in /tmp for easy debugging -->
+    <key>StandardOutPath</key>
+    <string>/tmp/reminders-api.out</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/reminders-api.err</string>
+
+    <!-- CRITICAL: Security entitlements for EventKit access -->
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+    
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+
+    <key>NSRemindersUsageDescription</key>
+    <string>This app needs access to Reminders to provide API access to your todos.</string>
+</dict>
+</plist>

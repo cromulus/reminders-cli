@@ -1,5 +1,6 @@
 .build
 reminders.tar.gz
+reminders-api.tar.gz
 .vscode
 CLAUDE.md
 reminders-menubar

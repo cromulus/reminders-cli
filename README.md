@@ -136,11 +136,35 @@ $ rm reminders.tar.gz
 
 This requires a recent Xcode installation.
 
-```
+```bash
+# Build the CLI
 $ cd reminders-cli
 $ make build-release
 $ cp .build/apple/Products/Release/reminders /usr/local/bin/reminders
+
+# Build the API server
+$ make build-api
+$ cp .build/apple/Products/Release/reminders-api /usr/local/bin/reminders-api
 ```
+
+#### Production Builds
+
+For production deployments, use the optimized release builds:
+
+```bash
+# Build both CLI and API for production
+$ make build-release build-api
+
+# Create production packages
+$ make package      # Creates reminders.tar.gz
+$ make package-api  # Creates reminders-api.tar.gz
+```
+
+The production builds include:
+- Universal binaries (ARM64 + x86_64)
+- Optimized performance
+- Debug symbols for troubleshooting
+- All dependencies statically linked
 
 ## REST API Server
 
@@ -613,4 +637,312 @@ curl -X POST http://localhost:8080/lists/Soon/reminders \
 
 # Mark a reminder as complete
 curl -X PATCH http://localhost:8080/lists/Soon/reminders/F3A0B3D8-E153-4AB9-B341-0C32A9AC6C2D/complete
+```
+
+## Running as a macOS Service (LaunchAgent)
+
+The reminders-api can be installed as a macOS LaunchAgent service to run automatically in the background. This is useful for:
+
+- Running the API server automatically on system startup
+- Keeping the server running even when you're not logged in
+- Integrating with other automation tools and services
+
+### Quick Installation
+
+The easiest way to install the service is using the provided installation script:
+
+```bash
+# Make sure you're in the reminders-cli directory
+cd reminders-cli
+
+# Run the installation script
+./install-service.sh
+```
+
+### Testing Your Installation
+
+After installation, use the test script to verify everything is working:
+
+```bash
+# Run the test script to diagnose any issues
+./test-service.sh
+```
+
+The test script will check:
+- Service loading and running status
+- Log files and error messages
+- API endpoint responsiveness
+- TCC permissions status
+- Binary location and permissions
+
+The script will:
+- Build the reminders-api binary if needed
+- Generate a secure API token
+- Create the necessary directories and files
+- Install and start the service
+- Provide you with the API token and management commands
+
+### Manual Installation
+
+If you prefer to install manually or need to customize the configuration:
+
+1. **Build the API server:**
+   ```bash
+   swift build --configuration release
+   ```
+
+2. **Generate an API token:**
+   ```bash
+   ./.build/apple/Products/Release/reminders-api --generate-token
+   ```
+
+3. **Create the service directory:**
+   ```bash
+   mkdir -p ~/Library/LaunchAgents
+   mkdir -p ~/Library/Logs/reminders-api
+   ```
+
+4. **Create the plist file:**
+   Copy `reminders-api.plist` to `~/Library/LaunchAgents/com.reminders.api.plist` and replace the placeholders:
+   - `REMINDERS_API_PATH` - Full path to your reminders-api binary
+   - `REMINDERS_API_TOKEN` - Your generated API token
+   - `REMINDERS_API_USER` - Your username
+   - `REMINDERS_API_HOME` - Your home directory path
+
+5. **Load the service:**
+   ```bash
+   launchctl load ~/Library/LaunchAgents/com.reminders.api.plist
+   ```
+
+### Service Management
+
+Once installed, you can manage the service using these commands:
+
+```bash
+# Check if the service is running
+launchctl print gui/$(id -u) | grep reminders
+
+# View service logs
+tail -f /tmp/reminders-api.out /tmp/reminders-api.err
+
+# Stop the service
+launchctl bootout gui/$(id -u) com.reminders.api
+
+# Start the service
+launchctl kickstart -kp gui/$(id -u)/com.reminders.api
+
+# Restart the service
+launchctl bootout gui/$(id -u) com.reminders.api
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.reminders.api.plist
+launchctl kickstart -kp gui/$(id -u)/com.reminders.api
+```
+
+### Troubleshooting Service Issues
+
+#### The Classic TCC Permissions Problem
+
+If the service returns empty lists or fails to start, you're likely encountering the **TCC (Transparency, Consent, and Control) permissions trap**. This is a common macOS issue where services can't access protected resources like Reminders.
+
+**Root Cause:** When you run `reminders-api` in Terminal, macOS grants Reminders access to Terminal.app. But when running as a LaunchAgent, the service runs as the binary itself, which doesn't have permission to control Reminders.
+
+#### Quick Diagnosis
+
+1. **Check if the service is running:**
+   ```bash
+   launchctl print gui/$(id -u) | grep reminders
+   ```
+
+2. **Check the logs:**
+   ```bash
+   tail -f /tmp/reminders-api.out /tmp/reminders-api.err
+   ```
+
+3. **Test the API:**
+   ```bash
+   curl -H "Authorization: Bearer YOUR_TOKEN" http://127.0.0.1:8080/lists
+   ```
+
+#### Fix TCC Permissions
+
+**Method 1: Grant Permission to the Binary (Recommended)**
+
+1. **Stop the service:**
+   ```bash
+   launchctl bootout gui/$(id -u) com.reminders.api
+   ```
+
+2. **Run the binary directly to trigger permission prompt:**
+   ```bash
+   /path/to/reminders-api --help
+   ```
+
+3. **When macOS prompts "reminders-api wants to control Reminders", click "Allow"**
+
+4. **Restart the service:**
+   ```bash
+   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.reminders.api.plist
+   launchctl kickstart -kp gui/$(id -u)/com.reminders.api
+   ```
+
+**Method 2: Reset and Re-grant Permissions**
+
+If permissions get confused:
+
+1. **Reset TCC permissions:**
+   ```bash
+   tccutil reset AppleEvents
+   ```
+
+2. **Follow Method 1 above**
+
+#### Verify Permissions
+
+Check that your binary has the correct permissions:
+
+1. **Open System Settings → Privacy & Security → Automation**
+2. **Look for your reminders-api binary in the list**
+3. **Ensure "Reminders" is toggled ON**
+
+#### Common Issues and Solutions
+
+**Issue: Service starts but returns empty lists `[]`**
+- **Cause:** TCC permissions not granted to the binary
+- **Solution:** Follow Method 1 above
+
+**Issue: Service fails to start (status shows `-`)**
+- **Cause:** Service not loaded into GUI session
+- **Solution:** Use proper GUI session commands:
+  ```bash
+  launchctl bootout gui/$(id -u) com.reminders.api
+  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.reminders.api.plist
+  ```
+
+**Issue: "Permission denied" errors**
+- **Cause:** Service running in wrong context
+- **Solution:** Ensure plist has `LimitLoadToSessionType: Aqua`
+
+**Issue: Service starts then immediately crashes**
+- **Cause:** Missing environment variables or working directory
+- **Solution:** Check plist has proper `EnvironmentVariables` and `WorkingDirectory`
+
+#### Advanced Troubleshooting
+
+**Check service status in detail:**
+```bash
+launchctl print gui/$(id -u)/com.reminders.api
+```
+
+**View system logs:**
+```bash
+log show --last 10m --predicate 'process == "reminders-api"' --info --style syslog
+```
+
+**Test EventKit access manually:**
+```bash
+# This should trigger a permission prompt if not already granted
+/path/to/reminders-api --help
+```
+
+**Reset all TCC permissions (nuclear option):**
+```bash
+sudo tccutil reset All
+# Then re-grant all permissions as needed
+```
+
+### Service Configuration
+
+The service is configured to:
+- Run on `127.0.0.1:8080` by default
+- Require authentication with a token
+- Run in the foreground to maintain user session access
+- Log output to `~/Library/Logs/reminders-api/`
+- Automatically start on system boot
+- Restart automatically if it crashes
+
+You can modify these settings by editing the plist file and reloading the service.
+
+### Production Deployment
+
+For deploying to remote servers, use the production deployment script:
+
+```bash
+# Deploy to a remote server
+./deploy-production.sh user@server.example.com
+
+# Deploy with custom settings
+./deploy-production.sh \
+  --token "your-api-token" \
+  --host "0.0.0.0" \
+  --port-api 8080 \
+  --dest "/usr/local/bin/" \
+  user@server.example.com
+
+# Deploy without building (use existing binary)
+./deploy-production.sh --no-build user@server.example.com
+
+# Deploy binary only (skip service installation)
+./deploy-production.sh --no-install user@server.example.com
+```
+
+The deployment script will:
+- Build the production binary (unless `--no-build` is used)
+- Copy the binary to the remote server
+- Install and configure the LaunchAgent service
+- Set up proper TCC permissions
+- Start the service automatically
+
+#### Deployment Options
+
+- `--port PORT`: SSH port (default: 22)
+- `--key KEYFILE`: SSH private key file
+- `--dest PATH`: Remote destination path (default: ~/.local/bin/)
+- `--token TOKEN`: API token (will generate if not provided)
+- `--host HOST`: API host to bind to (default: 127.0.0.1)
+- `--port-api PORT`: API port (default: 8080)
+- `--no-build`: Skip building, use existing binary
+- `--no-install`: Skip service installation
+
+#### Post-Deployment
+
+After deployment, test the service:
+
+```bash
+# Test the API
+curl -H "Authorization: Bearer YOUR_TOKEN" http://server.example.com:8080/lists
+
+# Check service status
+ssh user@server.example.com 'launchctl print gui/$(id -u) | grep reminders'
+
+# View logs
+ssh user@server.example.com 'tail -f /tmp/reminders-api.out /tmp/reminders-api.err'
+```
+
+### Uninstalling the Service
+
+To remove the service completely:
+
+```bash
+# Run the uninstall script
+./uninstall-service.sh
+```
+
+The uninstall script will:
+- Stop the running service
+- Remove the plist file
+- Optionally remove log files
+- Clean up the service configuration
+
+### Manual Uninstallation
+
+If you prefer to uninstall manually:
+
+```bash
+# Stop the service
+launchctl unload ~/Library/LaunchAgents/com.reminders.api.plist
+
+# Remove the plist file
+rm ~/Library/LaunchAgents/com.reminders.api.plist
+
+# Optionally remove logs
+rm -rf ~/Library/Logs/reminders-api/
 ```
