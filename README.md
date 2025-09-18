@@ -639,9 +639,9 @@ curl -X POST http://localhost:8080/lists/Soon/reminders \
 curl -X PATCH http://localhost:8080/lists/Soon/reminders/F3A0B3D8-E153-4AB9-B341-0C32A9AC6C2D/complete
 ```
 
-## Running as a macOS Service (LaunchAgent)
+## Running as a macOS Service
 
-The reminders-api can be installed as a macOS LaunchAgent service to run automatically in the background. This is useful for:
+The reminders-api can be installed as a startup service to run automatically in the background. This is useful for:
 
 - Running the API server automatically on system startup
 - Keeping the server running even when you're not logged in
@@ -656,31 +656,30 @@ The easiest way to install the service is using the provided installation script
 cd reminders-cli
 
 # Run the installation script
-./install-service.sh
+./install-service-simple.sh
 ```
+
+This script will:
+- Find or build the reminders-api binary
+- Generate a secure API token
+- Create a startup script
+- Set up proper TCC permissions
+- Start the service
 
 ### Testing Your Installation
 
-After installation, use the test script to verify everything is working:
+After installation, test the API to verify everything is working:
 
 ```bash
-# Run the test script to diagnose any issues
-./test-service.sh
+# Test the API (replace TOKEN with your actual token)
+curl -H "Authorization: Bearer YOUR_TOKEN" http://127.0.0.1:8080/lists
+
+# Check if the service is running
+pgrep -f reminders-api
+
+# View service logs
+tail -f /tmp/reminders-api-service.out /tmp/reminders-api-service.err
 ```
-
-The test script will check:
-- Service loading and running status
-- Log files and error messages
-- API endpoint responsiveness
-- TCC permissions status
-- Binary location and permissions
-
-The script will:
-- Build the reminders-api binary if needed
-- Generate a secure API token
-- Create the necessary directories and files
-- Install and start the service
-- Provide you with the API token and management commands
 
 ### Manual Installation
 
@@ -696,22 +695,30 @@ If you prefer to install manually or need to customize the configuration:
    ./.build/apple/Products/Release/reminders-api --generate-token
    ```
 
-3. **Create the service directory:**
+3. **Create a startup script:**
    ```bash
-   mkdir -p ~/Library/LaunchAgents
-   mkdir -p ~/Library/Logs/reminders-api
+   cat > ~/start-reminders-api-service.sh << 'EOF'
+   #!/bin/bash
+   # Startup script for reminders-api service
+   
+   # Kill any existing processes
+   pkill -f reminders-api
+   
+   # Wait a moment
+   sleep 2
+   
+   # Start the service
+   nohup /path/to/reminders-api --auth-required --token YOUR_TOKEN --host 127.0.0.1 --port 8080 > /tmp/reminders-api-service.out 2> /tmp/reminders-api-service.err &
+   
+   echo "Reminders API service started"
+   EOF
+   
+   chmod +x ~/start-reminders-api-service.sh
    ```
 
-4. **Create the plist file:**
-   Copy `reminders-api.plist` to `~/Library/LaunchAgents/com.reminders.api.plist` and replace the placeholders:
-   - `REMINDERS_API_PATH` - Full path to your reminders-api binary
-   - `REMINDERS_API_TOKEN` - Your generated API token
-   - `REMINDERS_API_USER` - Your username
-   - `REMINDERS_API_HOME` - Your home directory path
-
-5. **Load the service:**
+4. **Start the service:**
    ```bash
-   launchctl load ~/Library/LaunchAgents/com.reminders.api.plist
+   ~/start-reminders-api-service.sh
    ```
 
 ### Service Management
@@ -719,23 +726,29 @@ If you prefer to install manually or need to customize the configuration:
 Once installed, you can manage the service using these commands:
 
 ```bash
-# Check if the service is running
-launchctl print gui/$(id -u) | grep reminders
-
-# View service logs
-tail -f /tmp/reminders-api.out /tmp/reminders-api.err
+# Start the service
+~/start-reminders-api-service.sh
 
 # Stop the service
-launchctl bootout gui/$(id -u) com.reminders.api
+pkill -f reminders-api
 
-# Start the service
-launchctl kickstart -kp gui/$(id -u)/com.reminders.api
+# Check if the service is running
+pgrep -f reminders-api
 
-# Restart the service
-launchctl bootout gui/$(id -u) com.reminders.api
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.reminders.api.plist
-launchctl kickstart -kp gui/$(id -u)/com.reminders.api
+# View service logs
+tail -f /tmp/reminders-api-service.out /tmp/reminders-api-service.err
 ```
+
+### Automatic Startup After Reboots
+
+To make the service start automatically after reboots:
+
+1. **Go to System Preferences** → **Users & Groups** → **Login Items**
+2. **Click the + button**
+3. **Navigate to your startup script** (`~/start-reminders-api-service.sh`)
+4. **Add it to login items**
+
+The service will now start automatically when you log in.
 
 ### Troubleshooting Service Issues
 
