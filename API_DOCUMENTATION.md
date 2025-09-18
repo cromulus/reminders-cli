@@ -193,6 +193,25 @@ Registered Webhooks: 2
 
 ### Lists Management
 
+#### Get All Calendars
+
+**curl Example:**
+```bash
+curl "http://localhost:8080/calendars" \
+  -H "Authorization: Bearer your-api-token-here"
+```
+
+**Response:**
+```json
+[
+  {
+    "title": "Reminders",
+    "uuid": "ABC123-DEF456-GHI789",
+    "allowsContentModifications": true
+  }
+]
+```
+
 #### Get All Lists
 
 **curl Example:**
@@ -429,10 +448,10 @@ curl "http://localhost:8080/search?dueAfter=2024-01-01T00:00:00Z&dueBefore=2024-
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `query` | string | Text search in title/notes |
-| `lists` | string | Comma-separated list names to include |
-| `listUUIDs` | string | Comma-separated list UUIDs to include |
-| `exclude_lists` | string | Comma-separated list names to exclude |
-| `exclude_listUUIDs` | string | Comma-separated list UUIDs to exclude |
+| `lists` | string | Comma-separated list names/UUIDs to include |
+| `exclude_lists` | string | Comma-separated list names/UUIDs to exclude |
+| `calendars` | string | Comma-separated calendar names/UUIDs to include |
+| `exclude_calendars` | string | Comma-separated calendar names/UUIDs to exclude |
 | `completed` | string | Completion status (`all`, `true`, `false`) |
 | `dueBefore` | string | ISO8601 date - reminders due before |
 | `dueAfter` | string | ISO8601 date - reminders due after |
@@ -441,8 +460,8 @@ curl "http://localhost:8080/search?dueAfter=2024-01-01T00:00:00Z&dueBefore=2024-
 | `hasNotes` | boolean | Filter by presence of notes |
 | `hasDueDate` | boolean | Filter by presence of due date |
 | `priority` | string | Priority filter (`none`, `low`, `medium`, `high`, `any`, or comma-separated values) |
-| `priorityMin` | integer | Minimum priority level (0-9) |
-| `priorityMax` | integer | Maximum priority level (0-9) |
+| `priorityMin` | integer | Minimum priority level (0-3) |
+| `priorityMax` | integer | Maximum priority level (0-3) |
 | `sortBy` | string | Sort field (`title`, `dueDate`, `creationDate`, `lastModified`, `priority`, `list`) |
 | `sortOrder` | string | Sort direction (`asc`, `desc`) |
 | `limit` | integer | Maximum results to return |
@@ -478,6 +497,18 @@ curl "http://localhost:8080/search?priority=any" \
 **Low and medium priority reminders:**
 ```bash
 curl "http://localhost:8080/search?priority=low,medium" \
+  -H "Authorization: Bearer your-api-token-here"
+```
+
+**Mixed list identifiers (names and UUIDs):**
+```bash
+curl "http://localhost:8080/search?lists=Work,ABC123-DEF456-GHI789" \
+  -H "Authorization: Bearer your-api-token-here"
+```
+
+**Exclude specific calendars:**
+```bash
+curl "http://localhost:8080/search?exclude_calendars=Inbound,Archive" \
   -H "Authorization: Bearer your-api-token-here"
 ```
 

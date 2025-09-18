@@ -184,7 +184,18 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
     
     // MARK: - Resource Routes
     
-    // GET /lists - Get all reminder lists
+    // GET /calendars - Get all calendars (reminder lists)
+    app.router.get("calendars") { request -> HBResponse in
+        Logger.shared.info("Fetching all calendars")
+        let calendars = remindersService.getCalendars()
+        Logger.shared.debug("Found \(calendars.count) calendars")
+        let jsonEncoder = JSONEncoder()
+        jsonEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let calendarsData = try jsonEncoder.encode(calendars)
+        return HBResponse(status: .ok, headers: ["content-type": "application/json"], body: .byteBuffer(ByteBuffer(data: calendarsData)))
+    }
+    
+    // GET /lists - Get all reminder lists (alias for calendars)
     app.router.get("lists") { request -> HBResponse in
         Logger.shared.info("Fetching all reminder lists")
         let lists = remindersService.getCalendars()
@@ -899,10 +910,10 @@ func setReminderComplete(id: String, listName: String, complete: Bool, reminders
 
 // Definition of SearchParameters struct
 struct SearchParameters {
-    var listNames: [String]?
-    var listUUIDs: [String]?
-    var excludeListNames: [String]?
-    var excludeListUUIDs: [String]?
+    var lists: [String]?  // Unified parameter for list names and UUIDs
+    var excludeLists: [String]?  // Unified parameter for excluding list names and UUIDs
+    var calendars: [String]?  // Unified parameter for calendar names and UUIDs
+    var excludeCalendars: [String]?  // Unified parameter for excluding calendar names and UUIDs
     var query: String?
     var completed: DisplayOptions
     var dueBefore: Date?
@@ -927,11 +938,11 @@ func parseSearchParameters(_ request: HBRequest) -> SearchParameters {
     let dateFormatter = ISO8601DateFormatter()
     dateFormatter.formatOptions = [.withInternetDateTime]
     
-    // Parse list parameters
-    let listNames = queryParams.get("lists")?.components(separatedBy: ",")
-    let listUUIDs = queryParams.get("listUUIDs")?.components(separatedBy: ",")
-    let excludeListNames = queryParams.get("exclude_lists")?.components(separatedBy: ",")
-    let excludeListUUIDs = queryParams.get("exclude_listUUIDs")?.components(separatedBy: ",")
+    // Parse list and calendar parameters (unified)
+    let lists = queryParams.get("lists")?.components(separatedBy: ",")
+    let excludeLists = queryParams.get("exclude_lists")?.components(separatedBy: ",")
+    let calendars = queryParams.get("calendars")?.components(separatedBy: ",")
+    let excludeCalendars = queryParams.get("exclude_calendars")?.components(separatedBy: ",")
     
     // Parse text search
     let query = queryParams.get("query")
@@ -985,10 +996,10 @@ func parseSearchParameters(_ request: HBRequest) -> SearchParameters {
     let limit = queryParams.get("limit").flatMap { Int($0) }
     
     return SearchParameters(
-        listNames: listNames,
-        listUUIDs: listUUIDs,
-        excludeListNames: excludeListNames,
-        excludeListUUIDs: excludeListUUIDs,
+        lists: lists,
+        excludeLists: excludeLists,
+        calendars: calendars,
+        excludeCalendars: excludeCalendars,
         query: query,
         completed: completed,
         dueBefore: dueBefore,
@@ -1006,24 +1017,37 @@ func parseSearchParameters(_ request: HBRequest) -> SearchParameters {
     )
 }
 
+// Helper function to resolve calendar by name or UUID
+func resolveCalendar(identifier: String, remindersService: Reminders) -> EKCalendar? {
+    // First try as UUID
+    if let calendar = remindersService.calendar(withUUID: identifier) {
+        return calendar
+    }
+    
+    // Then try as name
+    return remindersService.calendar(withName: identifier)
+}
+
 // Search reminders based on provided parameters
 func searchReminders(params: SearchParameters, remindersService: Reminders) async throws -> [EKReminder] {
     return try await withCheckedThrowingContinuation { continuation in
         // Determine which calendars to search
         var calendarsToSearch: [EKCalendar] = []
         
-        if let listNames = params.listNames {
-            for name in listNames {
-                // This won't throw since the function calls exit(1) on error
-                // We'll need to handle that differently in a real API context
-                let calendar = remindersService.calendar(withName: name)
-                calendarsToSearch.append(calendar)
+        // Process lists parameter (unified names and UUIDs)
+        if let lists = params.lists {
+            for identifier in lists {
+                if let calendar = resolveCalendar(identifier: identifier, remindersService: remindersService),
+                   !calendarsToSearch.contains(where: { $0.calendarIdentifier == calendar.calendarIdentifier }) {
+                    calendarsToSearch.append(calendar)
+                }
             }
         }
         
-        if let listUUIDs = params.listUUIDs {
-            for uuid in listUUIDs {
-                if let calendar = remindersService.calendar(withUUID: uuid),
+        // Process calendars parameter (unified names and UUIDs)
+        if let calendars = params.calendars {
+            for identifier in calendars {
+                if let calendar = resolveCalendar(identifier: identifier, remindersService: remindersService),
                    !calendarsToSearch.contains(where: { $0.calendarIdentifier == calendar.calendarIdentifier }) {
                     calendarsToSearch.append(calendar)
                 }
@@ -1035,16 +1059,20 @@ func searchReminders(params: SearchParameters, remindersService: Reminders) asyn
             calendarsToSearch = remindersService.getCalendars()
         }
         
-        // Apply exclude list filters
-        if let excludeListNames = params.excludeListNames {
+        // Apply exclude filters
+        if let excludeLists = params.excludeLists {
             calendarsToSearch = calendarsToSearch.filter { calendar in
-                !excludeListNames.contains(calendar.title)
+                !excludeLists.contains { identifier in
+                    calendar.title == identifier || calendar.calendarIdentifier == identifier
+                }
             }
         }
         
-        if let excludeListUUIDs = params.excludeListUUIDs {
+        if let excludeCalendars = params.excludeCalendars {
             calendarsToSearch = calendarsToSearch.filter { calendar in
-                !excludeListUUIDs.contains(calendar.calendarIdentifier)
+                !excludeCalendars.contains { identifier in
+                    calendar.title == identifier || calendar.calendarIdentifier == identifier
+                }
             }
         }
         
@@ -1233,23 +1261,21 @@ func searchReminders(params: SearchParameters, remindersService: Reminders) asyn
     }
 }
 
-// Helper function to convert EKReminderPriority to Priority
+// Helper function to convert raw priority value to Priority enum
 func priorityFromRawValue(_ value: Int) -> Priority? {
-    if let priority = UInt(exactly: value).flatMap(EKReminderPriority.init) {
-        switch priority {
-        case .low:
-            return .low
-        case .medium:
-            return .medium
-        case .high:
-            return .high
-        case .none:
-            return Priority.none
-        @unknown default:
-            return Priority.none
-        }
+    // EKReminderPriority uses 0-9, but we map to 0-3
+    switch value {
+    case 0:
+        return Priority.none
+    case 1...3:
+        return .low
+    case 4...6:
+        return .medium
+    case 7...9:
+        return .high
+    default:
+        return Priority.none
     }
-    return nil
 }
 
 // Run the Configuration command defined above
