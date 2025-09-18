@@ -429,8 +429,10 @@ curl "http://localhost:8080/search?dueAfter=2024-01-01T00:00:00Z&dueBefore=2024-
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `query` | string | Text search in title/notes |
-| `lists` | string | Comma-separated list names |
-| `listUUIDs` | string | Comma-separated list UUIDs |
+| `lists` | string | Comma-separated list names to include |
+| `listUUIDs` | string | Comma-separated list UUIDs to include |
+| `exclude_lists` | string | Comma-separated list names to exclude |
+| `exclude_listUUIDs` | string | Comma-separated list UUIDs to exclude |
 | `completed` | string | Completion status (`all`, `true`, `false`) |
 | `dueBefore` | string | ISO8601 date - reminders due before |
 | `dueAfter` | string | ISO8601 date - reminders due after |
@@ -438,7 +440,7 @@ curl "http://localhost:8080/search?dueAfter=2024-01-01T00:00:00Z&dueBefore=2024-
 | `createdAfter` | string | ISO8601 date - created after |
 | `hasNotes` | boolean | Filter by presence of notes |
 | `hasDueDate` | boolean | Filter by presence of due date |
-| `priority` | string | Exact priority (`none`, `low`, `medium`, `high`) |
+| `priority` | string | Priority filter (`none`, `low`, `medium`, `high`, `any`, or comma-separated values) |
 | `priorityMin` | integer | Minimum priority level (0-9) |
 | `priorityMax` | integer | Maximum priority level (0-9) |
 | `sortBy` | string | Sort field (`title`, `dueDate`, `creationDate`, `lastModified`, `priority`, `list`) |
@@ -458,6 +460,24 @@ curl "http://localhost:8080/search?dueBefore=2024-01-01T00:00:00Z&completed=fals
 **High priority reminders in specific lists:**
 ```bash
 curl "http://localhost:8080/search?lists=Work,Personal&priority=high&sortBy=dueDate" \
+  -H "Authorization: Bearer your-api-token-here"
+```
+
+**All reminders except those in "Inbound" list:**
+```bash
+curl "http://localhost:8080/search?exclude_lists=Inbound" \
+  -H "Authorization: Bearer your-api-token-here"
+```
+
+**Reminders with any priority (excludes none):**
+```bash
+curl "http://localhost:8080/search?priority=any" \
+  -H "Authorization: Bearer your-api-token-here"
+```
+
+**Low and medium priority reminders:**
+```bash
+curl "http://localhost:8080/search?priority=low,medium" \
   -H "Authorization: Bearer your-api-token-here"
 ```
 

@@ -901,6 +901,8 @@ func setReminderComplete(id: String, listName: String, complete: Bool, reminders
 struct SearchParameters {
     var listNames: [String]?
     var listUUIDs: [String]?
+    var excludeListNames: [String]?
+    var excludeListUUIDs: [String]?
     var query: String?
     var completed: DisplayOptions
     var dueBefore: Date?
@@ -909,7 +911,7 @@ struct SearchParameters {
     var createdAfter: Date?
     var hasNotes: Bool?
     var hasDueDate: Bool?
-    var priority: Priority?
+    var priorities: [Priority]?
     var priorityMin: Int?
     var priorityMax: Int?
     var sortBy: String?
@@ -928,6 +930,8 @@ func parseSearchParameters(_ request: HBRequest) -> SearchParameters {
     // Parse list parameters
     let listNames = queryParams.get("lists")?.components(separatedBy: ",")
     let listUUIDs = queryParams.get("listUUIDs")?.components(separatedBy: ",")
+    let excludeListNames = queryParams.get("exclude_lists")?.components(separatedBy: ",")
+    let excludeListUUIDs = queryParams.get("exclude_listUUIDs")?.components(separatedBy: ",")
     
     // Parse text search
     let query = queryParams.get("query")
@@ -953,8 +957,23 @@ func parseSearchParameters(_ request: HBRequest) -> SearchParameters {
     let hasNotes = queryParams.get("hasNotes").flatMap { $0 == "true" ? true : ($0 == "false" ? false : nil) }
     let hasDueDate = queryParams.get("hasDueDate").flatMap { $0 == "true" ? true : ($0 == "false" ? false : nil) }
     
-    // Parse priority filters
-    let priority = queryParams.get("priority").flatMap { Priority(rawValue: $0) }
+    // Parse priority filters - support multiple values and "any"
+    let priorityParam = queryParams.get("priority")
+    let priorities: [Priority]?
+    
+    if let priorityParam = priorityParam {
+        if priorityParam == "any" {
+            // "any" means low, medium, high (excludes none)
+            priorities = [.low, .medium, .high]
+        } else {
+            // Parse comma-separated values
+            priorities = priorityParam.components(separatedBy: ",")
+                .compactMap { Priority(rawValue: $0.trimmingCharacters(in: .whitespaces)) }
+        }
+    } else {
+        priorities = nil // No filter = all priorities
+    }
+    
     let priorityMin = queryParams.get("priorityMin").flatMap { Int($0) }
     let priorityMax = queryParams.get("priorityMax").flatMap { Int($0) }
     
@@ -968,6 +987,8 @@ func parseSearchParameters(_ request: HBRequest) -> SearchParameters {
     return SearchParameters(
         listNames: listNames,
         listUUIDs: listUUIDs,
+        excludeListNames: excludeListNames,
+        excludeListUUIDs: excludeListUUIDs,
         query: query,
         completed: completed,
         dueBefore: dueBefore,
@@ -976,7 +997,7 @@ func parseSearchParameters(_ request: HBRequest) -> SearchParameters {
         createdAfter: createdAfter,
         hasNotes: hasNotes,
         hasDueDate: hasDueDate,
-        priority: priority,
+        priorities: priorities,
         priorityMin: priorityMin,
         priorityMax: priorityMax,
         sortBy: sortBy,
@@ -1012,6 +1033,19 @@ func searchReminders(params: SearchParameters, remindersService: Reminders) asyn
         // If no specific calendars were requested, search all
         if calendarsToSearch.isEmpty {
             calendarsToSearch = remindersService.getCalendars()
+        }
+        
+        // Apply exclude list filters
+        if let excludeListNames = params.excludeListNames {
+            calendarsToSearch = calendarsToSearch.filter { calendar in
+                !excludeListNames.contains(calendar.title)
+            }
+        }
+        
+        if let excludeListUUIDs = params.excludeListUUIDs {
+            calendarsToSearch = calendarsToSearch.filter { calendar in
+                !excludeListUUIDs.contains(calendar.calendarIdentifier)
+            }
         }
         
         // Fetch reminders from selected calendars
@@ -1102,10 +1136,11 @@ func searchReminders(params: SearchParameters, remindersService: Reminders) asyn
                 }
             }
             
-            // Filter by exact priority
-            if let priority = params.priority {
+            // Filter by priority levels
+            if let priorities = params.priorities {
                 filteredReminders = filteredReminders.filter { reminder in
-                    return reminder.priority == Int(priority.value.rawValue)
+                    let reminderPriority = priorityFromRawValue(reminder.priority) ?? .none
+                    return priorities.contains(reminderPriority)
                 }
             }
             
