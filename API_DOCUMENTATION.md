@@ -4,6 +4,8 @@
 
 The Reminders CLI HTTP API provides programmatic access to macOS Reminders data through a RESTful interface. Built with Swift and Hummingbird, it offers comprehensive reminder management capabilities including CRUD operations, advanced search, real-time webhook notifications, and access to private API features like subtasks, URL attachments, and mail links.
 
+**New in v1.1.0**: Enhanced n8n integration with declarative-style nodes that provide seamless workflow automation capabilities.
+
 ## Getting Started
 
 ### Prerequisites
@@ -1016,6 +1018,226 @@ print(f"Found {len(subtasks)} subtasks")
 url_reminders = api.find_reminders_with_urls()
 print(f"Found {len(url_reminders)} reminders with URL attachments")
 ```
+
+## n8n Integration
+
+The Reminders API includes comprehensive n8n node support for workflow automation. The integration uses declarative-style nodes that provide seamless access to all API functionality.
+
+### Installation
+
+1. **Download the n8n nodes package:**
+   ```bash
+   # Download the latest tarball
+   wget https://github.com/your-repo/reminders-cli/releases/latest/download/reminders-api.tar.gz
+   ```
+
+2. **Install in n8n:**
+   ```bash
+   # Install via n8n CLI
+   n8n community-package install reminders-api.tar.gz
+   
+   # Or install via n8n UI
+   # Go to Settings > Community Nodes > Install Package
+   # Upload the reminders-api.tar.gz file
+   ```
+
+### Available Nodes
+
+#### 1. Reminders Node
+The main node for all reminder operations with declarative routing.
+
+**Operations:**
+- **Create**: Create new reminders in specific lists
+- **Get**: Retrieve specific reminders by UUID
+- **Get All**: Fetch all reminders across all lists
+- **Update**: Modify existing reminders
+- **Delete**: Remove reminders
+- **Complete/Uncomplete**: Mark reminders as done or undone
+- **List Management**: Get all lists and reminders from specific lists
+
+**Configuration:**
+- **Resource**: Choose between "Reminder" or "List" operations
+- **Operation**: Select the specific action to perform
+- **Parameters**: Dynamic fields based on selected operation
+
+#### 2. SearchReminders Node
+Advanced search capabilities with filtering and sorting.
+
+**Features:**
+- Text search in titles and notes
+- Priority filtering
+- Date range filtering
+- List-specific searches
+- Completion status filtering
+- Sorting options
+
+#### 3. WebhookManager Node
+Manage webhook subscriptions for real-time notifications.
+
+**Operations:**
+- Create webhooks
+- Update webhook settings
+- Delete webhooks
+- Test webhook delivery
+- List all webhooks
+
+#### 4. RemindersTrigger Node
+Trigger workflows based on reminder events.
+
+**Event Types:**
+- Reminder created
+- Reminder updated
+- Reminder completed
+- Reminder deleted
+
+### Credentials Configuration
+
+The n8n integration requires proper credential setup:
+
+1. **API Base URL**: The base URL of your Reminders API server
+   - Example: `http://localhost:8080`
+   - Must be a valid HTTP/HTTPS URL
+   - Required field with validation
+
+2. **API Token**: Your authentication token (optional unless auth is required)
+   - Generated using: `reminders-api --generate-token`
+   - Can be left empty if authentication is disabled
+
+3. **Authentication Required**: Whether to require authentication for all requests
+   - Default: `false` (optional authentication)
+   - Set to `true` if your API server requires authentication
+
+### Common Workflow Examples
+
+#### 1. Create Reminder from Webhook
+```json
+{
+  "nodes": [
+    {
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook"
+    },
+    {
+      "name": "Create Reminder",
+      "type": "n8n-nodes-reminders.reminders",
+      "parameters": {
+        "resource": "reminder",
+        "operation": "create",
+        "listName": "{{ $json.list }}",
+        "title": "{{ $json.title }}",
+        "notes": "{{ $json.notes }}",
+        "dueDate": "{{ $json.dueDate }}",
+        "priority": "{{ $json.priority }}"
+      }
+    }
+  ]
+}
+```
+
+#### 2. Daily Reminder Summary
+```json
+{
+  "nodes": [
+    {
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger"
+    },
+    {
+      "name": "Get All Reminders",
+      "type": "n8n-nodes-reminders.reminders",
+      "parameters": {
+        "resource": "reminder",
+        "operation": "getAll",
+        "includeCompleted": false
+      }
+    },
+    {
+      "name": "Send Email",
+      "type": "n8n-nodes-base.sendEmail"
+    }
+  ]
+}
+```
+
+#### 3. High Priority Alert System
+```json
+{
+  "nodes": [
+    {
+      "name": "Search High Priority",
+      "type": "n8n-nodes-reminders.searchReminders",
+      "parameters": {
+        "priority": "high",
+        "completed": "false"
+      }
+    },
+    {
+      "name": "Slack Notification",
+      "type": "n8n-nodes-base.slack"
+    }
+  ]
+}
+```
+
+### Troubleshooting n8n Integration
+
+#### Common Issues
+
+1. **"Invalid URL" Error**
+   - **Cause**: Incorrect base URL format in credentials
+   - **Solution**: Ensure base URL includes protocol (http:// or https://)
+   - **Example**: Use `http://localhost:8080` not `localhost:8080`
+
+2. **Authentication Errors**
+   - **Cause**: Missing or invalid API token
+   - **Solution**: Generate token using `reminders-api --generate-token`
+   - **Check**: Verify token is correctly set in n8n credentials
+
+3. **Node Not Found**
+   - **Cause**: Package not properly installed
+   - **Solution**: Reinstall the package and restart n8n
+   - **Verify**: Check that nodes appear in the node palette
+
+4. **Connection Refused**
+   - **Cause**: Reminders API server not running
+   - **Solution**: Start the API server with `make run-api`
+   - **Check**: Verify server is accessible at the configured URL
+
+#### Debug Mode
+
+Enable debug logging in n8n to troubleshoot issues:
+
+1. **Set n8n log level:**
+   ```bash
+   export N8N_LOG_LEVEL=debug
+   n8n start
+   ```
+
+2. **Check API server logs:**
+   ```bash
+   ./reminders-api --log-level DEBUG
+   ```
+
+3. **Test API connectivity:**
+   ```bash
+   curl "http://localhost:8080/lists" \
+     -H "Authorization: Bearer your-token"
+   ```
+
+### Version History
+
+#### v1.1.0 (Current)
+- ✅ Fixed "Invalid URL" error in n8n nodes
+- ✅ Implemented pure declarative routing
+- ✅ Enhanced credential validation with helpful error messages
+- ✅ Improved URL format validation
+- ✅ Updated to use correct `baseURL` property in requestDefaults
+
+#### v1.0.0
+- Initial n8n integration
+- Basic CRUD operations
+- Search functionality
+- Webhook management
 
 ## OpenAPI Specification
 
