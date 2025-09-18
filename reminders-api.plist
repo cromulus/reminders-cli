@@ -4,7 +4,7 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.reminders.api</string>
+    <string>com.billcromie.reminders-cli.api</string>
 
     <key>ProgramArguments</key>
     <array>

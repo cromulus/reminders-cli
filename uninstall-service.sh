@@ -36,7 +36,7 @@ main() {
     # Get user information
     CURRENT_USER=$(whoami)
     USER_HOME=$(eval echo ~$CURRENT_USER)
-    PLIST_FILE="$USER_HOME/Library/LaunchAgents/com.reminders.api.plist"
+    PLIST_FILE="$USER_HOME/Library/LaunchAgents/com.billcromie.reminders-cli.api.plist"
     LOGS_DIR="$USER_HOME/Library/Logs/reminders-api"
     
     print_status "Uninstalling for user: $CURRENT_USER"
@@ -45,9 +45,9 @@ main() {
     USER_ID=$(id -u)
     
     # Check if service is running
-    if launchctl print "gui/$USER_ID" | grep -q "com.reminders.api"; then
+    if launchctl print "gui/$USER_ID" | grep -q "com.billcromie.reminders-cli.api"; then
         print_status "Stopping the service..."
-        launchctl bootout "gui/$USER_ID" com.reminders.api 2>/dev/null || true
+        launchctl bootout "gui/$USER_ID" com.billcromie.reminders-cli.api 2>/dev/null || true
         print_success "Service stopped"
     else
         print_warning "Service is not currently running"
@@ -75,7 +75,7 @@ main() {
     fi
     
     # Verify removal
-    if ! launchctl print "gui/$USER_ID" | grep -q "com.reminders.api"; then
+    if ! launchctl print "gui/$USER_ID" | grep -q "com.billcromie.reminders-cli.api"; then
         print_success "Service successfully uninstalled!"
     else
         print_warning "Service may still be running. Try restarting your system."

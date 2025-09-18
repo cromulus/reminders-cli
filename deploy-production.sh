@@ -129,6 +129,11 @@ if [[ -z "$REMOTE_HOST" ]]; then
     exit 1
 fi
 
+# Function to check if command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
 # Function to build the production binary
 build_production() {
     print_status "Building production reminders-api..."

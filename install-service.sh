@@ -60,6 +60,7 @@ find_reminders_api() {
         "./.build/debug/reminders-api"
         "./reminders-api"
         "/usr/local/bin/reminders-api"
+        "$HOME/.local/bin/reminders-api"
         "$(which reminders-api 2>/dev/null)"
     )
     
@@ -137,7 +138,7 @@ main() {
     mkdir -p "$LAUNCH_AGENTS_DIR"
     
     # Create the plist file
-    PLIST_FILE="$LAUNCH_AGENTS_DIR/com.reminders.api.plist"
+    PLIST_FILE="$LAUNCH_AGENTS_DIR/com.billcromie.reminders-cli.api.plist"
     
     # Generate plist content with proper TCC configuration
     cat > "$PLIST_FILE" << EOF
@@ -147,7 +148,7 @@ main() {
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.reminders.api</string>
+    <string>com.billcromie.reminders-cli.api</string>
 
     <key>ProgramArguments</key>
     <array>
@@ -243,22 +244,22 @@ EOF
     USER_ID=$(id -u)
     
     # Bootout any existing service
-    launchctl bootout "gui/$USER_ID" com.reminders.api 2>/dev/null || true
+    launchctl bootout "gui/$USER_ID" com.billcromie.reminders-cli.api 2>/dev/null || true
     
     # Bootstrap the service into the GUI session
     launchctl bootstrap "gui/$USER_ID" "$PLIST_FILE"
     
     # Enable the service
-    launchctl enable "gui/$USER_ID/com.reminders.api"
+    launchctl enable "gui/$USER_ID/com.billcromie.reminders-cli.api"
     
     # Kickstart the service
-    launchctl kickstart -kp "gui/$USER_ID/com.reminders.api"
+    launchctl kickstart -kp "gui/$USER_ID/com.billcromie.reminders-cli.api"
     
     # Wait a moment for the service to start
     sleep 3
     
     # Check if service is running
-    if launchctl print "gui/$USER_ID" | grep -q "com.reminders.api"; then
+    if launchctl print "gui/$USER_ID" | grep -q "com.billcromie.reminders-cli.api"; then
         print_success "Service loaded successfully into GUI session!"
     else
         print_warning "Service may not have loaded properly. Check logs for details."
@@ -269,7 +270,7 @@ EOF
     print_success "Installation completed!"
     echo
     echo "Service Details:"
-    echo "  - Service Name: com.reminders.api"
+    echo "  - Service Name: com.billcromie.reminders-cli.api"
     echo "  - API Endpoint: http://127.0.0.1:8080"
     echo "  - API Token: $API_TOKEN"
     echo "  - Logs Directory: $LOGS_DIR"
@@ -277,9 +278,9 @@ EOF
     echo "Management Commands:"
     echo "  - Check status: launchctl print gui/\$(id -u) | grep reminders"
     echo "  - View logs: tail -f /tmp/reminders-api.out /tmp/reminders-api.err"
-    echo "  - Stop service: launchctl bootout gui/\$(id -u) com.reminders.api"
-    echo "  - Start service: launchctl kickstart -kp gui/\$(id -u)/com.reminders.api"
-    echo "  - Restart service: launchctl bootout gui/\$(id -u) com.reminders.api && launchctl bootstrap gui/\$(id -u) $PLIST_FILE"
+    echo "  - Stop service: launchctl bootout gui/\$(id -u) com.billcromie.reminders-cli.api"
+    echo "  - Start service: launchctl kickstart -kp gui/\$(id -u)/com.billcromie.reminders-cli.api"
+    echo "  - Restart service: launchctl bootout gui/\$(id -u) com.billcromie.reminders-cli.api && launchctl bootstrap gui/\$(id -u) $PLIST_FILE"
     echo
     echo "Test the API:"
     echo "  curl -H \"Authorization: Bearer $API_TOKEN\" http://127.0.0.1:8080/lists"

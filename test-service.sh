@@ -50,21 +50,21 @@ main() {
     
     # Test 1: Check if service is loaded
     print_status "1. Checking if service is loaded..."
-    if launchctl print "gui/$USER_ID" | grep -q "com.reminders.api"; then
+    if launchctl print "gui/$USER_ID" | grep -q "com.billcromie.reminders-cli.api"; then
         print_success "Service is loaded in GUI session"
     else
         print_error "Service is NOT loaded in GUI session"
-        echo "  Run: launchctl bootstrap gui/$USER_ID ~/Library/LaunchAgents/com.reminders.api.plist"
+        echo "  Run: launchctl bootstrap gui/$USER_ID ~/Library/LaunchAgents/com.billcromie.reminders-cli.api.plist"
     fi
     echo
     
     # Test 2: Check if service is running
     print_status "2. Checking if service is running..."
-    if launchctl print "gui/$USER_ID" | grep -A5 "com.reminders.api" | grep -q "state = running"; then
+    if launchctl print "gui/$USER_ID" | grep -A5 "com.billcromie.reminders-cli.api" | grep -q "state = running"; then
         print_success "Service is running"
     else
         print_warning "Service is loaded but not running"
-        echo "  Run: launchctl kickstart -kp gui/$USER_ID/com.reminders.api"
+        echo "  Run: launchctl kickstart -kp gui/$USER_ID/com.billcromie.reminders-cli.api"
     fi
     echo
     
@@ -91,7 +91,7 @@ main() {
     print_status "4. Testing API endpoint..."
     if command_exists curl; then
         # Try to get the API token from the plist
-        PLIST_FILE="$USER_HOME/Library/LaunchAgents/com.reminders.api.plist"
+        PLIST_FILE="$USER_HOME/Library/LaunchAgents/com.billcromie.reminders-cli.api.plist"
         if [[ -f "$PLIST_FILE" ]]; then
             # Extract token from plist (this is a simple approach)
             TOKEN=$(grep -A1 "token" "$PLIST_FILE" | tail -1 | sed 's/.*<string>\(.*\)<\/string>.*/\1/')
@@ -152,10 +152,10 @@ main() {
     echo "If you see errors above, here are the most common fixes:"
     echo
     echo "1. Service not loaded:"
-    echo "   launchctl bootstrap gui/$USER_ID ~/Library/LaunchAgents/com.reminders.api.plist"
+    echo "   launchctl bootstrap gui/$USER_ID ~/Library/LaunchAgents/com.billcromie.reminders-cli.api.plist"
     echo
     echo "2. Service not running:"
-    echo "   launchctl kickstart -kp gui/$USER_ID/com.reminders.api"
+    echo "   launchctl kickstart -kp gui/$USER_ID/com.billcromie.reminders-cli.api"
     echo
     echo "3. Empty API response (TCC permissions):"
     echo "   $BINARY_PATH --help  # Grant permission when prompted"
@@ -164,9 +164,9 @@ main() {
     echo "   tail -f /tmp/reminders-api.out /tmp/reminders-api.err"
     echo
     echo "5. Full restart:"
-    echo "   launchctl bootout gui/$USER_ID com.reminders.api"
-    echo "   launchctl bootstrap gui/$USER_ID ~/Library/LaunchAgents/com.reminders.api.plist"
-    echo "   launchctl kickstart -kp gui/$USER_ID/com.reminders.api"
+    echo "   launchctl bootout gui/$USER_ID com.billcromie.reminders-cli.api"
+    echo "   launchctl bootstrap gui/$USER_ID ~/Library/LaunchAgents/com.billcromie.reminders-cli.api.plist"
+    echo "   launchctl kickstart -kp gui/$USER_ID/com.billcromie.reminders-cli.api"
 }
 
 # Run main function
