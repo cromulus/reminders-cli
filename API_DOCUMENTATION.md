@@ -279,7 +279,7 @@ curl "http://localhost:8080/lists/ABC123-DEF456-GHI789" \
     "startDate": null,
     "completionDate": null,
     "isCompleted": false,
-    "priority": 5,
+    "priority": 2,
     "list": "Shopping",
     "listUUID": "LIST-UUID-123",
     "creationDate": "2024-01-01T09:00:00Z",
@@ -548,7 +548,7 @@ curl "http://localhost:8080/webhooks" \
       "listNames": ["Work", "Personal"],
       "listUUIDs": null,
       "completed": "incomplete",
-      "priorityLevels": [5, 9],
+      "priorityLevels": [2, 3],
       "hasQuery": null
     }
   }
@@ -591,7 +591,7 @@ curl -X POST "http://localhost:8080/webhooks" \
       "listNames": ["Work", "Personal"],
       "listUUIDs": ["uuid1", "uuid2"],
       "completed": "incomplete",
-      "priorityLevels": [5, 9],
+      "priorityLevels": [2, 3],
       "hasQuery": "urgent"
     }
   }'
@@ -601,7 +601,7 @@ curl -X POST "http://localhost:8080/webhooks" \
 - `listNames`: Array of list names to monitor
 - `listUUIDs`: Array of list UUIDs to monitor
 - `completed`: Completion status filter (`all`, `complete`, `incomplete`)
-- `priorityLevels`: Array of priority levels to monitor (0-9)
+- `priorityLevels`: Array of priority levels to monitor (0-3)
 - `hasQuery`: Text that must be present in title/notes
 
 #### Update Webhook
@@ -669,7 +669,7 @@ When events occur, webhooks receive POST requests with this payload structure:
     "notes": "Don't forget milk and bread",
     "dueDate": "2024-01-15T10:00:00Z",
     "isCompleted": false,
-    "priority": 5,
+    "priority": 2,
     "list": "Shopping",
     "listUUID": "LIST-UUID-123",
     "creationDate": "2024-01-01T09:00:00Z",
@@ -707,7 +707,7 @@ When events occur, webhooks receive POST requests with this payload structure:
   "startDate": "string|null",         // ISO8601 start date
   "completionDate": "string|null",    // ISO8601 completion date
   "isCompleted": "boolean",           // Completion status
-  "priority": "number",               // Priority level (0-9)
+  "priority": "number",               // Priority level (0-3)
   "list": "string",                   // Name of containing list
   "listUUID": "string",               // UUID of containing list
   "creationDate": "string|null",      // ISO8601 creation date
@@ -890,7 +890,7 @@ curl -X POST "http://localhost:8080/webhooks" \
     "name": "High priority work reminders",
     "filter": {
       "listNames": ["Work"],
-      "priorityLevels": [5, 9],
+      "priorityLevels": [2, 3],
       "completed": "incomplete"
     }
   }'

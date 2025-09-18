@@ -1263,15 +1263,15 @@ func searchReminders(params: SearchParameters, remindersService: Reminders) asyn
 
 // Helper function to convert raw priority value to Priority enum
 func priorityFromRawValue(_ value: Int) -> Priority? {
-    // EKReminderPriority uses 0-9, but we map to 0-3
+    // Priority uses 0-3 scale
     switch value {
     case 0:
         return Priority.none
-    case 1...3:
+    case 1:
         return .low
-    case 4...6:
+    case 2:
         return .medium
-    case 7...9:
+    case 3:
         return .high
     default:
         return Priority.none

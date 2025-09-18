@@ -325,7 +325,7 @@ Response:
     "lastModifiedDate": "2025-03-10T14:30:00Z",
     "listName": "Soon",
     "notes": "Important deadline",
-    "priority": 5,
+    "priority": 2,
     "title": "Finish project proposal"
   },
   {
@@ -414,7 +414,7 @@ curl -X POST http://localhost:8080/webhooks \
     "name": "High priority work reminders",
     "filter": {
       "listNames": ["Work"],
-      "priorityLevels": [1, 5, 9],
+      "priorityLevels": [1, 2, 3],
       "completed": "incomplete"
     }
   }'
@@ -469,7 +469,7 @@ Response:
     "isActive": true,
     "filter": {
       "listNames": ["Work"],
-      "priorityLevels": [1, 5, 9],
+      "priorityLevels": [1, 2, 3],
       "completed": "incomplete",
       "listUUIDs": null,
       "hasQuery": null
@@ -543,7 +543,7 @@ HTTP 204 No Content
     "lastModifiedDate": "2025-03-10T14:30:00Z",
     "listName": "Soon",
     "notes": "Important deadline",
-    "priority": 5,
+    "priority": 2,
     "title": "Finish project proposal"
   },
   {
@@ -554,7 +554,7 @@ HTTP 204 No Content
     "lastModifiedDate": "2025-03-08T11:20:00Z",
     "listName": "Work",
     "notes": null,
-    "priority": 9,
+    "priority": 3,
     "title": "Team meeting"
   }
 ]
