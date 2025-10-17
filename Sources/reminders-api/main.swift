@@ -329,16 +329,54 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
         guard let listName = request.parameters.get("listName") else {
             throw HBHTTPError(.badRequest, message: "Missing list name")
         }
-        
+
         guard let reminderId = request.parameters.get("id") else {
             throw HBHTTPError(.badRequest, message: "Missing reminder ID")
         }
-        
+
         try await setReminderComplete(id: reminderId, listName: listName, complete: false, remindersService: remindersService)
-        
+
         return HBResponse(status: .ok)
     }
-    
+
+    // PATCH /lists/:listName/reminders/:id - Update a reminder
+    app.router.patch("lists/:listName/reminders/:id") { request -> HBResponse in
+        guard let listName = request.parameters.get("listName") else {
+            throw HBHTTPError(.badRequest, message: "Missing list name")
+        }
+
+        guard let reminderId = request.parameters.get("id") else {
+            throw HBHTTPError(.badRequest, message: "Missing reminder ID")
+        }
+
+        Logger.shared.info("Updating reminder \(reminderId) in list: \(listName)")
+
+        struct ReminderUpdateRequest: Decodable {
+            let title: String?
+            let notes: String?
+            let dueDate: String?
+            let priority: String?
+        }
+
+        let updateRequest = try request.decode(as: ReminderUpdateRequest.self)
+
+        let updatedReminder = try await updateReminder(
+            id: reminderId,
+            listName: listName,
+            title: updateRequest.title,
+            notes: updateRequest.notes,
+            dueDateString: updateRequest.dueDate,
+            priority: updateRequest.priority,
+            remindersService: remindersService
+        )
+
+        Logger.shared.info("Successfully updated reminder: \(reminderId)")
+        let jsonEncoder = JSONEncoder()
+        jsonEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let reminderData = try jsonEncoder.encode(updatedReminder)
+        return HBResponse(status: .ok, headers: ["content-type": "application/json"], body: .byteBuffer(ByteBuffer(data: reminderData)))
+    }
+
     // New direct UUID-based endpoints
     
     // GET /reminders/:uuid - Get a reminder by UUID
@@ -875,11 +913,11 @@ func deleteReminder(id: String, listName: String, remindersService: Reminders) a
 func setReminderComplete(id: String, listName: String, complete: Bool, remindersService: Reminders) async throws {
     return try await withCheckedThrowingContinuation { continuation in
         let calendar = remindersService.calendar(withName: listName)
-        
+
         // Handle both formats (with and without the protocol prefix)
         let prefix = "x-apple-reminder://"
         let fullId = id.hasPrefix(prefix) ? id : "\(prefix)\(id)"
-        
+
         remindersService.reminders(on: [calendar], displayOptions: .all) { reminders in
             // Try with the fully qualified ID first
             if let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == fullId }) {
@@ -891,7 +929,7 @@ func setReminderComplete(id: String, listName: String, complete: Bool, reminders
                 }
                 return
             }
-            
+
             // For backward compatibility, try with the original ID string
             if let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == id }) {
                 do {
@@ -902,7 +940,91 @@ func setReminderComplete(id: String, listName: String, complete: Bool, reminders
                 }
                 return
             }
-            
+
+            continuation.resume(throwing: HBHTTPError(.notFound, message: "Reminder not found"))
+        }
+    }
+}
+
+// Helper function to update a reminder
+func updateReminder(id: String, listName: String, title: String?, notes: String?,
+                   dueDateString: String?, priority: String?, remindersService: Reminders) async throws -> EKReminder {
+    return try await withCheckedThrowingContinuation { continuation in
+        let calendar = remindersService.calendar(withName: listName)
+
+        // Handle both formats (with and without the protocol prefix)
+        let prefix = "x-apple-reminder://"
+        let fullId = id.hasPrefix(prefix) ? id : "\(prefix)\(id)"
+
+        remindersService.reminders(on: [calendar], displayOptions: .all) { reminders in
+            // Try with the fully qualified ID first
+            if let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == fullId }) {
+                // Update fields if provided
+                if let title = title {
+                    reminder.title = title
+                }
+
+                if let notes = notes {
+                    reminder.notes = notes
+                }
+
+                if let dueDateString = dueDateString {
+                    let formatter = ISO8601DateFormatter()
+                    formatter.formatOptions = [.withInternetDateTime]
+                    if let date = formatter.date(from: dueDateString) {
+                        reminder.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+                    }
+                }
+
+                if let priorityString = priority {
+                    if let priority = Priority(rawValue: priorityString) {
+                        reminder.priority = Int(priority.value.rawValue)
+                    }
+                }
+
+                do {
+                    try remindersService.updateReminder(reminder)
+                    continuation.resume(returning: reminder)
+                } catch {
+                    continuation.resume(throwing: HBHTTPError(.internalServerError, message: error.localizedDescription))
+                }
+                return
+            }
+
+            // For backward compatibility, try with the original ID string
+            if let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == id }) {
+                // Update fields if provided
+                if let title = title {
+                    reminder.title = title
+                }
+
+                if let notes = notes {
+                    reminder.notes = notes
+                }
+
+                if let dueDateString = dueDateString {
+                    let formatter = ISO8601DateFormatter()
+                    formatter.formatOptions = [.withInternetDateTime]
+                    if let date = formatter.date(from: dueDateString) {
+                        reminder.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+                    }
+                }
+
+                if let priorityString = priority {
+                    if let priority = Priority(rawValue: priorityString) {
+                        reminder.priority = Int(priority.value.rawValue)
+                    }
+                }
+
+                do {
+                    try remindersService.updateReminder(reminder)
+                    continuation.resume(returning: reminder)
+                } catch {
+                    continuation.resume(throwing: HBHTTPError(.internalServerError, message: error.localizedDescription))
+                }
+                return
+            }
+
             continuation.resume(throwing: HBHTTPError(.notFound, message: "Reminder not found"))
         }
     }
