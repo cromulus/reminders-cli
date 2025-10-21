@@ -1,12 +1,13 @@
 """API client for Reminders CLI integration."""
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
@@ -22,13 +23,16 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# API request timeout (30 seconds)
+API_TIMEOUT = 30
+
 
 class RemindersAPIClient:
     """Client to interact with Reminders API."""
 
     def __init__(
         self,
-        hass,
+        hass: HomeAssistant,
         url: str,
         token: str | None = None,
     ) -> None:
@@ -54,12 +58,14 @@ class RemindersAPIClient:
         """Make an API request."""
         url = f"{self.url}{endpoint}"
         headers = self._get_headers()
+        timeout = aiohttp.ClientTimeout(total=API_TIMEOUT)
 
         try:
             async with self._session.request(
                 method,
                 url,
                 headers=headers,
+                timeout=timeout,
                 **kwargs,
             ) as response:
                 response.raise_for_status()
@@ -85,7 +91,7 @@ class RemindersAPIClient:
 
     async def get_reminders(self, list_name: str, include_completed: bool = False) -> list[dict[str, Any]]:
         """Get reminders from a specific list."""
-        endpoint = ENDPOINT_LIST_REMINDERS.format(list_name=list_name)
+        endpoint = ENDPOINT_LIST_REMINDERS.format(list_name=quote(list_name, safe=''))
         if include_completed:
             endpoint += "?completed=true"
         return await self._request("GET", endpoint)
@@ -99,7 +105,7 @@ class RemindersAPIClient:
         priority: str | None = None,
     ) -> dict[str, Any]:
         """Create a new reminder."""
-        endpoint = ENDPOINT_CREATE_REMINDER.format(list_name=list_name)
+        endpoint = ENDPOINT_CREATE_REMINDER.format(list_name=quote(list_name, safe=''))
         data: dict[str, Any] = {"title": title}
 
         if notes:
@@ -122,7 +128,7 @@ class RemindersAPIClient:
     ) -> dict[str, Any]:
         """Update an existing reminder."""
         endpoint = ENDPOINT_UPDATE_REMINDER.format(
-            list_name=list_name, reminder_id=reminder_id
+            list_name=quote(list_name, safe=''), reminder_id=reminder_id
         )
         data: dict[str, Any] = {}
 
@@ -140,21 +146,21 @@ class RemindersAPIClient:
     async def delete_reminder(self, list_name: str, reminder_id: str) -> None:
         """Delete a reminder."""
         endpoint = ENDPOINT_DELETE_REMINDER.format(
-            list_name=list_name, reminder_id=reminder_id
+            list_name=quote(list_name, safe=''), reminder_id=reminder_id
         )
         await self._request("DELETE", endpoint)
 
     async def complete_reminder(self, list_name: str, reminder_id: str) -> None:
         """Mark a reminder as complete."""
         endpoint = ENDPOINT_COMPLETE_REMINDER.format(
-            list_name=list_name, reminder_id=reminder_id
+            list_name=quote(list_name, safe=''), reminder_id=reminder_id
         )
         await self._request("PATCH", endpoint)
 
     async def uncomplete_reminder(self, list_name: str, reminder_id: str) -> None:
         """Mark a reminder as incomplete."""
         endpoint = ENDPOINT_UNCOMPLETE_REMINDER.format(
-            list_name=list_name, reminder_id=reminder_id
+            list_name=quote(list_name, safe=''), reminder_id=reminder_id
         )
         await self._request("PATCH", endpoint)
 
