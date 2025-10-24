@@ -182,6 +182,32 @@ logger:
     custom_components.reminders_cli: debug
 ```
 
+## Changelog
+
+### v1.0.1 (2025-10-16)
+
+**Critical and Major Bug Fixes:**
+- ✅ Added `CoordinatorEntity` inheritance - entities now auto-update when data changes
+- ✅ Added URL encoding for list names with special characters (spaces, &, etc.)
+- ✅ Added 30-second HTTP timeouts to prevent integration hangs
+- ✅ Added comprehensive error handling with descriptive error messages
+- ✅ Optimized updates to avoid redundant API calls (better performance)
+- ✅ Added `available` property for accurate entity state when API is down
+- ✅ Added `device_info` for proper entity grouping in UI
+- ✅ Fixed entity ID generation to handle list names with spaces
+
+For complete details, see `FIXES.md`.
+
+### v1.0.0 (2025-10-16)
+
+**Initial Release:**
+- Home Assistant todo list integration for reminders-api
+- GUI-configurable setup with health check validation
+- Full CRUD support for reminders
+- Due dates and descriptions support
+- 30-second polling updates
+- Optional Bearer token authentication
+
 ## Support
 
 For issues, feature requests, or contributions, please visit:

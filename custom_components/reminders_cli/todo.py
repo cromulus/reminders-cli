@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from typing import Any
 
 from homeassistant.components.todo import (
     TodoItem,
@@ -11,11 +12,10 @@ from homeassistant.components.todo import (
     TodoListEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.util import slugify
 
 from . import RemindersDataUpdateCoordinator
 from .const import DOMAIN
@@ -30,14 +30,22 @@ async def async_setup_entry(
 ) -> None:
     """Set up the Reminders CLI todo platform."""
     coordinator: RemindersDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    known_ids: set[str] = set()
 
-    # Create a todo entity for each reminder list
-    entities = [
-        RemindersTodoListEntity(coordinator, list_name)
-        for list_name in coordinator.lists_data.keys()
-    ]
+    @callback
+    def _sync_entities() -> None:
+        new_entities: list[RemindersTodoListEntity] = []
+        for list_id in coordinator.lists_data:
+            if list_id in known_ids:
+                continue
+            new_entities.append(RemindersTodoListEntity(coordinator, list_id))
+            known_ids.add(list_id)
 
-    async_add_entities(entities)
+        if new_entities:
+            async_add_entities(new_entities)
+
+    _sync_entities()
+    entry.async_on_unload(coordinator.async_add_listener(_sync_entities))
 
 
 class RemindersTodoListEntity(CoordinatorEntity[RemindersDataUpdateCoordinator], TodoListEntity):
@@ -55,13 +63,28 @@ class RemindersTodoListEntity(CoordinatorEntity[RemindersDataUpdateCoordinator],
     def __init__(
         self,
         coordinator: RemindersDataUpdateCoordinator,
-        list_name: str,
+        list_id: str,
     ) -> None:
         """Initialize the todo list entity."""
         super().__init__(coordinator)
-        self.list_name = list_name
-        self._attr_unique_id = f"{coordinator.entry.entry_id}_{slugify(list_name)}"
-        self._attr_name = list_name
+        self.list_id = list_id
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_{list_id}"
+        self._attr_name = self._display_name
+
+    @property
+    def _metadata(self) -> dict[str, Any]:
+        """Return metadata for this reminders list."""
+        return self.coordinator.lists_meta.get(self.list_id, {})
+
+    @property
+    def _display_name(self) -> str:
+        """Return the display name for this list."""
+        return self._metadata.get("title") or self.list_id
+
+    @property
+    def name(self) -> str | None:
+        """Return the current list name."""
+        return self._display_name
 
     @property
     def device_info(self):
@@ -82,11 +105,11 @@ class RemindersTodoListEntity(CoordinatorEntity[RemindersDataUpdateCoordinator],
     @property
     def todo_items(self) -> list[TodoItem] | None:
         """Return the todo items."""
-        reminders = self.coordinator.lists_data.get(self.list_name, [])
+        reminders = self.coordinator.lists_data.get(self.list_id, [])
 
         return [
             TodoItem(
-                uid=reminder["id"],
+                uid=uid,
                 summary=reminder.get("title", ""),
                 status=TodoItemStatus.COMPLETED
                 if reminder.get("isCompleted", False)
@@ -95,6 +118,7 @@ class RemindersTodoListEntity(CoordinatorEntity[RemindersDataUpdateCoordinator],
                 description=reminder.get("notes"),
             )
             for reminder in reminders
+            if (uid := self._reminder_uid(reminder))
         ]
 
     def _parse_due_date(self, due_date_str: str | None) -> datetime | None:
@@ -111,12 +135,12 @@ class RemindersTodoListEntity(CoordinatorEntity[RemindersDataUpdateCoordinator],
         """Create a new todo item."""
         try:
             await self.coordinator.api.create_reminder(
-                list_name=self.list_name,
+                list_name=self.list_id,
                 title=item.summary,
                 notes=item.description,
                 due_date=item.due,
             )
-            await self.coordinator.async_refresh_list(self.list_name)
+            await self.coordinator.async_refresh_list(self.list_id)
         except Exception as err:
             raise HomeAssistantError(f"Failed to create reminder: {err}") from err
 
@@ -124,14 +148,19 @@ class RemindersTodoListEntity(CoordinatorEntity[RemindersDataUpdateCoordinator],
         """Update a todo item."""
         try:
             reminder_id = self._extract_reminder_id(item.uid)
-            reminders = self.coordinator.lists_data.get(self.list_name, [])
+            reminders = self.coordinator.lists_data.get(self.list_id, [])
             current_reminder = next(
-                (r for r in reminders if r["id"] == reminder_id), None
+                (
+                    r
+                    for r in reminders
+                    if self._extract_reminder_id(self._reminder_uid(r)) == reminder_id
+                ),
+                None,
             )
 
             if not current_reminder:
                 raise HomeAssistantError(
-                    f"Reminder {item.uid} not found in list {self.list_name}"
+                    f"Reminder {item.uid} not found in list {self._display_name}"
                 )
 
             # Check if completion status changed
@@ -148,11 +177,11 @@ class RemindersTodoListEntity(CoordinatorEntity[RemindersDataUpdateCoordinator],
             if is_completed != was_completed and not (title_changed or notes_changed or due_changed):
                 if is_completed:
                     await self.coordinator.api.complete_reminder(
-                        self.list_name, reminder_id
+                        self.list_id, reminder_id
                     )
                 else:
                     await self.coordinator.api.uncomplete_reminder(
-                        self.list_name, reminder_id
+                        self.list_id, reminder_id
                     )
             else:
                 # Update all fields (including status via isCompleted in the update)
@@ -161,24 +190,24 @@ class RemindersTodoListEntity(CoordinatorEntity[RemindersDataUpdateCoordinator],
                 if is_completed != was_completed:
                     if is_completed:
                         await self.coordinator.api.complete_reminder(
-                            self.list_name, reminder_id
+                            self.list_id, reminder_id
                         )
                     else:
                         await self.coordinator.api.uncomplete_reminder(
-                            self.list_name, reminder_id
+                            self.list_id, reminder_id
                         )
 
                 # Only call update if non-status fields changed
                 if title_changed or notes_changed or due_changed:
                     await self.coordinator.api.update_reminder(
-                        list_name=self.list_name,
+                        list_name=self.list_id,
                         reminder_id=reminder_id,
                         title=item.summary if title_changed else None,
                         notes=item.description if notes_changed else None,
                         due_date=item.due if due_changed else None,
                     )
 
-            await self.coordinator.async_refresh_list(self.list_name)
+            await self.coordinator.async_refresh_list(self.list_id)
         except Exception as err:
             raise HomeAssistantError(f"Failed to update reminder: {err}") from err
 
@@ -187,16 +216,25 @@ class RemindersTodoListEntity(CoordinatorEntity[RemindersDataUpdateCoordinator],
         try:
             for uid in uids:
                 reminder_id = self._extract_reminder_id(uid)
-                await self.coordinator.api.delete_reminder(self.list_name, reminder_id)
+                await self.coordinator.api.delete_reminder(self.list_id, reminder_id)
 
-            await self.coordinator.async_refresh_list(self.list_name)
+            await self.coordinator.async_refresh_list(self.list_id)
         except Exception as err:
             raise HomeAssistantError(f"Failed to delete reminders: {err}") from err
 
-    def _extract_reminder_id(self, uid: str) -> str:
+    def _reminder_uid(self, reminder: dict[str, Any]) -> str | None:
+        """Return the external identifier for a reminder."""
+        uid = reminder.get("externalId") or reminder.get("uuid") or reminder.get("id")
+        if isinstance(uid, str):
+            return uid
+        return None
+
+    def _extract_reminder_id(self, uid: str | None) -> str:
         """Extract reminder ID from UID."""
-        # The API returns IDs in the format "x-apple-reminder://UUID"
-        # We need just the UUID part
+        if not uid:
+            raise HomeAssistantError("Reminder identifier is missing")
+
+        # Handle IDs prefixed with the x-apple scheme
         if uid.startswith("x-apple-reminder://"):
             return uid.replace("x-apple-reminder://", "")
         return uid

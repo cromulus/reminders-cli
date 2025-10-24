@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+import json
 from typing import Any
 from urllib.parse import quote
 
@@ -71,7 +72,22 @@ class RemindersAPIClient:
                 response.raise_for_status()
                 if response.status == 204:  # No Content
                     return None
-                return await response.json()
+
+                text = await response.text()
+                if not text.strip():
+                    return None
+
+                content_type = response.headers.get("Content-Type", "")
+                if "application/json" in content_type.lower():
+                    try:
+                        return json.loads(text)
+                    except json.JSONDecodeError as err:
+                        _LOGGER.error(
+                            "Failed to decode JSON response for %s %s: %s", method, url, err
+                        )
+                        raise
+
+                return text
         except aiohttp.ClientError as err:
             _LOGGER.error("API request failed: %s %s - %s", method, url, err)
             raise
@@ -85,13 +101,13 @@ class RemindersAPIClient:
             _LOGGER.error("Connection test failed: %s", err)
             return False
 
-    async def get_lists(self) -> list[str]:
-        """Get all reminder lists."""
+    async def get_lists(self) -> list[dict[str, Any]]:
+        """Get all reminder lists with metadata."""
         return await self._request("GET", ENDPOINT_LISTS)
 
     async def get_reminders(self, list_name: str, include_completed: bool = False) -> list[dict[str, Any]]:
         """Get reminders from a specific list."""
-        endpoint = ENDPOINT_LIST_REMINDERS.format(list_name=quote(list_name, safe=''))
+        endpoint = ENDPOINT_LIST_REMINDERS.format(list_name=quote(list_name, safe=""))
         if include_completed:
             endpoint += "?completed=true"
         return await self._request("GET", endpoint)
@@ -105,7 +121,7 @@ class RemindersAPIClient:
         priority: str | None = None,
     ) -> dict[str, Any]:
         """Create a new reminder."""
-        endpoint = ENDPOINT_CREATE_REMINDER.format(list_name=quote(list_name, safe=''))
+        endpoint = ENDPOINT_CREATE_REMINDER.format(list_name=quote(list_name, safe=""))
         data: dict[str, Any] = {"title": title}
 
         if notes:
@@ -128,7 +144,8 @@ class RemindersAPIClient:
     ) -> dict[str, Any]:
         """Update an existing reminder."""
         endpoint = ENDPOINT_UPDATE_REMINDER.format(
-            list_name=quote(list_name, safe=''), reminder_id=reminder_id
+            list_name=quote(list_name, safe=""),
+            reminder_id=quote(reminder_id, safe=""),
         )
         data: dict[str, Any] = {}
 
@@ -146,21 +163,24 @@ class RemindersAPIClient:
     async def delete_reminder(self, list_name: str, reminder_id: str) -> None:
         """Delete a reminder."""
         endpoint = ENDPOINT_DELETE_REMINDER.format(
-            list_name=quote(list_name, safe=''), reminder_id=reminder_id
+            list_name=quote(list_name, safe=""),
+            reminder_id=quote(reminder_id, safe=""),
         )
         await self._request("DELETE", endpoint)
 
     async def complete_reminder(self, list_name: str, reminder_id: str) -> None:
         """Mark a reminder as complete."""
         endpoint = ENDPOINT_COMPLETE_REMINDER.format(
-            list_name=quote(list_name, safe=''), reminder_id=reminder_id
+            list_name=quote(list_name, safe=""),
+            reminder_id=quote(reminder_id, safe=""),
         )
         await self._request("PATCH", endpoint)
 
     async def uncomplete_reminder(self, list_name: str, reminder_id: str) -> None:
         """Mark a reminder as incomplete."""
         endpoint = ENDPOINT_UNCOMPLETE_REMINDER.format(
-            list_name=quote(list_name, safe=''), reminder_id=reminder_id
+            list_name=quote(list_name, safe=""),
+            reminder_id=quote(reminder_id, safe=""),
         )
         await self._request("PATCH", endpoint)
 

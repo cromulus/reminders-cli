@@ -71,6 +71,7 @@ class RemindersDataUpdateCoordinator(DataUpdateCoordinator):
         self.entry = entry
         self.webhook_id: str | None = None
         self.lists_data: dict[str, list[dict]] = {}
+        self.lists_meta: dict[str, dict] = {}
 
         super().__init__(
             hass,
@@ -82,21 +83,36 @@ class RemindersDataUpdateCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> dict[str, list[dict]]:
         """Fetch data from API."""
         try:
-            # Get all lists
-            lists = await self.api.get_lists()
+            # Get all lists with metadata
+            raw_lists = await self.api.get_lists()
 
-            # Fetch reminders for each list
-            lists_data = {}
-            for list_name in lists:
+            lists_meta: dict[str, dict] = {}
+            lists_data: dict[str, list[dict]] = {}
+
+            for list_info in raw_lists:
+                list_id = list_info.get("uuid") or list_info.get("id")
+                if not list_id:
+                    _LOGGER.warning("Skipping list without UUID: %s", list_info)
+                    continue
+
+                lists_meta[list_id] = list_info
+
                 try:
                     reminders = await self.api.get_reminders(
-                        list_name, include_completed=True
+                        list_id, include_completed=True
                     )
-                    lists_data[list_name] = reminders
+                    lists_data[list_id] = reminders or []
                 except Exception as err:  # pylint: disable=broad-except
-                    _LOGGER.error("Error fetching reminders for %s: %s", list_name, err)
-                    lists_data[list_name] = []
+                    display_name = list_info.get("title", list_id)
+                    _LOGGER.error(
+                        "Error fetching reminders for %s (%s): %s",
+                        display_name,
+                        list_id,
+                        err,
+                    )
+                    lists_data[list_id] = []
 
+            self.lists_meta = lists_meta
             self.lists_data = lists_data
             return lists_data
 
@@ -104,11 +120,12 @@ class RemindersDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.error("Error fetching data: %s", err)
             raise UpdateFailed(f"Error communicating with API: {err}") from err
 
-    async def async_refresh_list(self, list_name: str) -> None:
+    async def async_refresh_list(self, list_id: str) -> None:
         """Refresh data for a specific list."""
         try:
-            reminders = await self.api.get_reminders(list_name, include_completed=True)
-            self.lists_data[list_name] = reminders
+            reminders = await self.api.get_reminders(list_id, include_completed=True)
+            self.lists_data[list_id] = reminders or []
             self.async_set_updated_data(self.lists_data)
         except Exception as err:  # pylint: disable=broad-except
-            _LOGGER.error("Error refreshing list %s: %s", list_name, err)
+            display_name = self.lists_meta.get(list_id, {}).get("title", list_id)
+            _LOGGER.error("Error refreshing list %s (%s): %s", display_name, list_id, err)
