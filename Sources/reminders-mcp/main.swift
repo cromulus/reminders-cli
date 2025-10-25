@@ -55,8 +55,9 @@ struct RemindersMCP: AsyncParsableCommand {
     }
 
     private func runStdio(reminders: Reminders) async throws {
-        let server = await RemindersMCPServerFactory.makeServer(reminders: reminders, verbose: verbose)
+        let (server, notifier) = await RemindersMCPServerFactory.makeServer(reminders: reminders, verbose: verbose)
         let transport = MCP.StdioTransport()
+        defer { notifier.stop() }
         try await server.start(transport: transport)
         print("reminders-mcp running with stdio transport")
         await server.waitUntilCompleted()

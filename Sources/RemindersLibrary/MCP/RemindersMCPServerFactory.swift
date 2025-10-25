@@ -5,11 +5,14 @@ public enum RemindersMCPServerFactory {
     private static let serverName = "reminders-mcp"
     private static let serverVersion = "0.1.0"
 
-    public static func makeServer(reminders: Reminders = Reminders(), verbose: Bool = false) async -> Server {
+    public static func makeServer(
+        reminders: Reminders = Reminders(),
+        verbose: Bool = false
+    ) async -> (Server, ReminderResourceNotifier) {
         let context = RemindersMCPContext(reminders: reminders, verbose: verbose)
         let capabilities = Server.Capabilities(
             logging: .init(),
-            resources: .init(subscribe: false, listChanged: false),
+            resources: .init(subscribe: true, listChanged: true),
             tools: .init(listChanged: false)
         )
 
@@ -25,7 +28,8 @@ public enum RemindersMCPServerFactory {
         )
 
         await registerHandlers(server: server, context: context)
-        return server
+        let notifier = ReminderResourceNotifier(reminders: reminders, server: server, verbose: verbose)
+        return (server, notifier)
     }
 
     private static func registerHandlers(server: Server, context: RemindersMCPContext) async {

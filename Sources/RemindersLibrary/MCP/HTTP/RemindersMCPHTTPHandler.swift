@@ -9,6 +9,7 @@ actor MCPHTTPSession {
 
     private let server: Server
     private let transport: HTTPServerTransport
+    private let notifier: ReminderResourceNotifier
     private let verbose: Bool
 
     private var serverTask: Task<Void, Never>?
@@ -18,10 +19,11 @@ actor MCPHTTPSession {
     private var streamer: HBByteBufferStreamer?
     private let allocator = ByteBufferAllocator()
 
-    init(id: String, server: Server, transport: HTTPServerTransport, verbose: Bool) {
+    init(id: String, server: Server, transport: HTTPServerTransport, notifier: ReminderResourceNotifier, verbose: Bool) {
         self.id = id
         self.server = server
         self.transport = transport
+        self.notifier = notifier
         self.verbose = verbose
     }
 
@@ -71,6 +73,7 @@ actor MCPHTTPSession {
     func close() async {
         await transport.disconnect()
         await server.stop()
+        notifier.stop()
         serverTask?.cancel()
         serverTask = nil
 
@@ -201,14 +204,21 @@ public final actor RemindersMCPHTTPHandler {
 
     private func createSession() async throws -> MCPHTTPSession {
         let identifier = UUID().uuidString.lowercased()
-        let server = await RemindersMCPServerFactory.makeServer(reminders: reminders, verbose: verbose)
+        let (server, notifier) = await RemindersMCPServerFactory.makeServer(reminders: reminders, verbose: verbose)
         let transport = HTTPServerTransport()
-        let session = MCPHTTPSession(id: identifier, server: server, transport: transport, verbose: verbose)
+        let session = MCPHTTPSession(
+            id: identifier,
+            server: server,
+            transport: transport,
+            notifier: notifier,
+            verbose: verbose
+        )
         sessions[identifier] = session
         do {
             try await session.start()
         } catch {
             sessions.removeValue(forKey: identifier)
+            notifier.stop()
             throw error
         }
         return session

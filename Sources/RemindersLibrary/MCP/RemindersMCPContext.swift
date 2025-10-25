@@ -193,8 +193,7 @@ private extension RemindersMCPContext {
                 ]),
                 "isCompleted": .object(["type": .string("boolean")]),
                 "includeCompleted": .object(["type": .string("boolean")])
-            ]),
-            "required": .array([.string("operation")])
+            ])
         ])
     }
 
