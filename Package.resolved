@@ -1,6 +1,15 @@
 {
   "pins" : [
     {
+      "identity" : "eventsource",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/mattt/eventsource.git",
+      "state" : {
+        "revision" : "a2965424a4babeb0c8e4b5ec9708c3939bc52449",
+        "version" : "1.2.0"
+      }
+    },
+    {
       "identity" : "hummingbird",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/hummingbird-project/hummingbird.git",
@@ -160,6 +169,15 @@
       "state" : {
         "revision" : "e0ec0f5f3af6f3e4d5e7a19d2af26b481acb6ba8",
         "version" : "1.0.3"
+      }
+    },
+    {
+      "identity" : "swift-sdk",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/modelcontextprotocol/swift-sdk.git",
+      "state" : {
+        "revision" : "c0407a0b52677cb395d824cac2879b963075ba8c",
+        "version" : "0.10.2"
       }
     },
     {

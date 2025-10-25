@@ -100,6 +100,7 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
     let remindersService = Reminders()
     let webhookManager = WebhookManager(remindersService: remindersService)
     let authManager = AuthManager(token: token, requireAuth: requireAuth)
+    let mcpHandler = RemindersMCPHTTPHandler(reminders: remindersService)
     
     Logger.shared.debug("Creating Hummingbird application...")
     
@@ -123,7 +124,7 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
     app.middleware.add(
         HBCORSMiddleware(
             allowOrigin: .all,
-            allowHeaders: ["Content-Type", "Authorization"],
+            allowHeaders: ["Content-Type", "Authorization", "Mcp-Session-Id"],
             allowMethods: [.GET, .POST, .PUT, .DELETE, .PATCH]
         )
     )
@@ -151,7 +152,16 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
     // Add auth check middleware
     app.middleware.add(AuthCheckMiddleware())
     Logger.shared.debug("Auth check middleware added")
-    
+
+    // MCP Routes
+    app.router.post("mcp") { request in
+        try await mcpHandler.handlePost(request)
+    }
+
+    app.router.get("mcp") { request in
+        try await mcpHandler.handleStream(request)
+    }
+
     // MARK: - Authentication Settings Routes
     
     // POST /auth/settings - Configure authentication settings

@@ -4,15 +4,17 @@ import PackageDescription
 let package = Package(
     name: "reminders",
     platforms: [
-        .macOS(.v10_15)
+        .macOS("15.0")
     ],
     products: [
         .executable(name: "reminders", targets: ["reminders"]),
         .executable(name: "reminders-api", targets: ["reminders-api"]),
+        .executable(name: "reminders-mcp", targets: ["reminders-mcp"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", .upToNextMinor(from: "1.3.1")),
         .package(url: "https://github.com/hummingbird-project/hummingbird.git", .upToNextMinor(from: "1.8.2")),
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.10.0"),
     ],
     targets: [
         .executableTarget(
@@ -27,11 +29,20 @@ let package = Package(
                 .product(name: "HummingbirdFoundation", package: "hummingbird"),
             ]
         ),
+        .executableTarget(
+            name: "reminders-mcp",
+            dependencies: [
+                .product(name: "MCP", package: "swift-sdk"),
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                "RemindersLibrary"
+            ]
+        ),
         .target(
             name: "RemindersLibrary",
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "Hummingbird", package: "hummingbird"),
+                .product(name: "MCP", package: "swift-sdk"),
             ]
         ),
         .testTarget(
