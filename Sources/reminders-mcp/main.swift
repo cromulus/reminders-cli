@@ -87,6 +87,10 @@ struct RemindersMCP: AsyncParsableCommand {
             try await handler.handleStream(request)
         }
 
+        app.router.delete("mcp") { request in
+            try await handler.handleDelete(request)
+        }
+
         try app.start()
         print("reminders-mcp HTTP transport running at http://\(hostname):\(port)/mcp")
         app.wait()

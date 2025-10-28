@@ -25,8 +25,6 @@ public final class ReminderResourceNotifier {
         ) { [weak self] _ in
             self?.scheduleNotificationEmission()
         }
-
-        scheduleNotificationEmission()
     }
 
     deinit {

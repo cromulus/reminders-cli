@@ -133,8 +133,10 @@ actor MCPHTTPSession {
 
 public final actor RemindersMCPHTTPHandler {
     private var sessions: [String: MCPHTTPSession] = [:]
+    private var clientSessionMap: [String: String] = [:]
     private let reminders: Reminders
     private let verbose: Bool
+    private var nextGeneratedRequestID: Int = 1
 
     public init(reminders: Reminders = Reminders(), verbose: Bool = false) {
         self.reminders = reminders
@@ -143,19 +145,59 @@ public final actor RemindersMCPHTTPHandler {
 
     public func handlePost(_ request: HBRequest) async throws -> HBResponse {
         let body = try await readBody(from: request)
+        guard let normalization = normalizeJSONRPCPayload(body) else {
+            return makeErrorResponse(
+                id: nil,
+                code: -32700,
+                message: "Parse error: Invalid JSON",
+                querySessionID: request.uri.queryParameters.get("sessionId")
+            )
+        }
+
+        let normalizedBody = normalization.data
+        guard let methodName = normalization.method else {
+            return makeErrorResponse(
+                id: normalization.id,
+                code: -32600,
+                message: "Invalid Request: missing method",
+                querySessionID: request.uri.queryParameters.get("sessionId")
+            )
+        }
+        let requestID = normalization.id
         let suppliedSessionID = request.headers.first(name: "Mcp-Session-Id")
+        let querySessionID = request.uri.queryParameters.get("sessionId")
+        var resolvedSessionID = resolveSessionIdentifier(header: suppliedSessionID, query: querySessionID)
+
+        if resolvedSessionID == nil {
+            if methodName == Ping.name {
+                return makeImmediateResponse(id: requestID, querySessionID: querySessionID)
+            }
+
+            if methodName != Initialize.name {
+                return makeErrorResponse(
+                    id: requestID,
+                    code: -32600,
+                    message: "Invalid Request: session not initialized",
+                    querySessionID: querySessionID
+                )
+            }
+        }
 
         let session: MCPHTTPSession
-        if let suppliedSessionID {
-            guard let existing = sessions[suppliedSessionID] else {
+        if let existingID = resolvedSessionID {
+            guard let existing = sessions[existingID] else {
                 throw HBHTTPError(.notFound, message: "Unknown MCP session")
             }
             session = existing
         } else {
             session = try await createSession()
+            resolvedSessionID = session.id
+            if let querySessionID {
+                clientSessionMap[querySessionID] = session.id
+            }
         }
 
-        await session.enqueueRequest(body)
+        await session.enqueueRequest(normalizedBody)
         let responsePayload: Data
 
         do {
@@ -166,15 +208,12 @@ public final actor RemindersMCPHTTPHandler {
             throw HBHTTPError(.internalServerError, message: error.localizedDescription)
         }
 
-        var headers = HTTPHeaders()
-        headers.add(name: "content-type", value: "application/json")
-        headers.add(name: "cache-control", value: "no-cache")
-        headers.add(name: "Mcp-Session-Id", value: session.id)
-
-        var buffer = request.allocator.buffer(capacity: responsePayload.count)
-        buffer.writeBytes(responsePayload)
-
-        return HBResponse(status: .ok, headers: headers, body: .byteBuffer(buffer))
+        return makeSuccessResponse(
+            payload: responsePayload,
+            sessionID: resolvedSessionID ?? session.id,
+            querySessionID: querySessionID,
+            allocator: request.allocator
+        )
     }
 
     public func handleStream(_ request: HBRequest) async throws -> HBResponse {
@@ -200,6 +239,31 @@ public final actor RemindersMCPHTTPHandler {
         headers.add(name: "Mcp-Session-Id", value: sessionID)
 
         return HBResponse(status: .ok, headers: headers, body: .stream(streamer))
+    }
+
+    public func handleDelete(_ request: HBRequest) async throws -> HBResponse {
+        let sessionID = request.headers.first(name: "Mcp-Session-Id")
+            ?? request.uri.queryParameters.get("sessionId")
+
+        guard let sessionID else {
+            throw HBHTTPError(.notFound, message: "Unknown MCP session")
+        }
+
+        let resolvedSessionID = sessions[sessionID] != nil
+            ? sessionID
+            : clientSessionMap[sessionID]
+
+        guard let resolvedSessionID, let session = sessions.removeValue(forKey: resolvedSessionID) else {
+            throw HBHTTPError(.notFound, message: "Unknown MCP session")
+        }
+
+        clientSessionMap = clientSessionMap.filter { $0.value != resolvedSessionID }
+
+        await session.close()
+
+        var headers = HTTPHeaders()
+        headers.add(name: "Mcp-Session-Id", value: resolvedSessionID)
+        return HBResponse(status: .noContent, headers: headers, body: .empty)
     }
 
     private func createSession() async throws -> MCPHTTPSession {
@@ -234,5 +298,121 @@ public final actor RemindersMCPHTTPHandler {
         }
 
         return Data()
+    }
+
+    private func normalizeJSONRPCPayload(_ body: Data) -> (data: Data, method: String?, id: Any?)? {
+        guard !body.isEmpty,
+              let object = try? JSONSerialization.jsonObject(with: body),
+              var payload = object as? [String: Any]
+        else {
+            return nil
+        }
+
+        let method = payload["method"] as? String
+        var requestID = payload["id"]
+
+        if payload["jsonrpc"] == nil {
+            payload["jsonrpc"] = "2.0"
+        }
+
+        if payload["id"] == nil {
+            payload["id"] = nextGeneratedRequestID
+            nextGeneratedRequestID += 1
+            requestID = payload["id"]
+        }
+
+        if let data = try? JSONSerialization.data(withJSONObject: payload) {
+            return (data, method, requestID)
+        }
+
+        return nil
+    }
+
+    private func makeImmediateResponse(id: Any?, querySessionID: String?) -> HBResponse {
+        let headers = commonHeaders(sessionID: nil, querySessionID: querySessionID)
+        let identifier: Any
+        if let id {
+            identifier = id
+        } else {
+            identifier = nextGeneratedRequestID
+            nextGeneratedRequestID += 1
+        }
+        let responseObject: [String: Any] = [
+            "jsonrpc": "2.0",
+            "id": identifier,
+            "result": [:]
+        ]
+        let data = (try? JSONSerialization.data(withJSONObject: responseObject)) ?? Data()
+        var buffer = ByteBufferAllocator().buffer(capacity: data.count)
+        buffer.writeBytes(data)
+        return HBResponse(status: .ok, headers: headers, body: .byteBuffer(buffer))
+    }
+
+    private func makeSuccessResponse(
+        payload: Data,
+        sessionID: String,
+        querySessionID: String?,
+        allocator: ByteBufferAllocator
+    ) -> HBResponse {
+        let headers = commonHeaders(sessionID: sessionID, querySessionID: querySessionID)
+        var buffer = allocator.buffer(capacity: payload.count)
+        buffer.writeBytes(payload)
+        return HBResponse(status: .ok, headers: headers, body: .byteBuffer(buffer))
+    }
+
+    private func commonHeaders(sessionID: String?, querySessionID: String?) -> HTTPHeaders {
+        var headers = HTTPHeaders()
+        headers.add(name: "content-type", value: "application/json")
+        headers.add(name: "cache-control", value: "no-cache")
+        if let sessionID {
+            headers.add(name: "Mcp-Session-Id", value: sessionID)
+        }
+        if let querySessionID {
+            headers.add(name: "Mcp-Client-Session-Id", value: querySessionID)
+        }
+        return headers
+    }
+
+    private func makeErrorResponse(
+        id: Any?,
+        code: Int,
+        message: String,
+        querySessionID: String?
+    ) -> HBResponse {
+        let headers = commonHeaders(sessionID: nil, querySessionID: querySessionID)
+        let responseObject: [String: Any] = [
+            "jsonrpc": "2.0",
+            "id": id ?? NSNull(),
+            "error": [
+                "code": code,
+                "message": message
+            ]
+        ]
+        let data = (try? JSONSerialization.data(withJSONObject: responseObject)) ?? Data()
+        var buffer = ByteBufferAllocator().buffer(capacity: data.count)
+        buffer.writeBytes(data)
+        return HBResponse(status: .ok, headers: headers, body: .byteBuffer(buffer))
+    }
+
+    private func resolveSessionIdentifier(header: String?, query: String?) -> String? {
+        if let header {
+            if sessions[header] != nil {
+                return header
+            }
+            if let mapped = clientSessionMap[header] {
+                return mapped
+            }
+        }
+
+        if let query {
+            if sessions[query] != nil {
+                return query
+            }
+            if let mapped = clientSessionMap[query] {
+                return mapped
+            }
+        }
+
+        return nil
     }
 }

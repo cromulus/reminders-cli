@@ -162,6 +162,10 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
         try await mcpHandler.handleStream(request)
     }
 
+    app.router.delete("mcp") { request in
+        try await mcpHandler.handleDelete(request)
+    }
+
     // MARK: - Authentication Settings Routes
     
     // POST /auth/settings - Configure authentication settings
@@ -695,25 +699,20 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
             request.httpBody = payloadData
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             
-            // Send the test request synchronously
-            var testSuccess = false
-            let group = DispatchGroup()
-            group.enter()
-            
-            let task = URLSession.shared.dataTask(with: request) { _, response, error in
+            let testSucceeded: Bool
+            do {
+                let (_, response) = try await URLSession.shared.data(for: request)
                 if let httpResponse = response as? HTTPURLResponse {
-                    testSuccess = (200...299).contains(httpResponse.statusCode)
+                    testSucceeded = (200...299).contains(httpResponse.statusCode)
+                } else {
+                    testSucceeded = false
                 }
-                group.leave()
+            } catch {
+                Logger.shared.warn("Test webhook delivery failed: \(error.localizedDescription)")
+                testSucceeded = false
             }
-            task.resume()
-            
-            // Wait with timeout (5 seconds)
-            _ = group.wait(timeout: .now() + 5)
-            
-            // Use the WebhookTestResponse struct defined at the top of the file
-            
-            if testSuccess {
+
+            if testSucceeded {
                 let response = WebhookTestResponse(
                     success: true,
                     message: "Test webhook sent successfully"
