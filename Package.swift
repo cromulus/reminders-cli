@@ -14,7 +14,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", .upToNextMinor(from: "1.3.1")),
         .package(url: "https://github.com/hummingbird-project/hummingbird.git", .upToNextMinor(from: "1.8.2")),
-        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.10.0"),
+        .package(url: "https://github.com/Cocoanetics/SwiftMCP.git", branch: "main"),
     ],
     targets: [
         .executableTarget(
@@ -32,7 +32,7 @@ let package = Package(
         .executableTarget(
             name: "reminders-mcp",
             dependencies: [
-                .product(name: "MCP", package: "swift-sdk"),
+                .product(name: "SwiftMCP", package: "SwiftMCP"),
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 "RemindersLibrary"
             ]
@@ -42,7 +42,6 @@ let package = Package(
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "Hummingbird", package: "hummingbird"),
-                .product(name: "MCP", package: "swift-sdk"),
             ]
         ),
         .testTarget(

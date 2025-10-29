@@ -85,7 +85,7 @@ public enum Priority: String, ExpressibleByArgument {
 }
 
 public final class Reminders {
-    let store: EKEventStore
+    public let store: EKEventStore
     
     public init(store: EKEventStore = sharedEventStore) {
         self.store = store
@@ -344,7 +344,7 @@ public final class Reminders {
         semaphore.wait()
     }
 
-    func newList(with name: String, source requestedSourceName: String?) {
+    public func newList(with name: String, source requestedSourceName: String?) {
         let store = EKEventStore()
         let sources = store.sources
         guard var source = sources.first else {
