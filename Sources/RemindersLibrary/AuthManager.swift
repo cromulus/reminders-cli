@@ -77,44 +77,67 @@ public class AuthManager {
     private var requireAuth: Bool
     
     /// Initialize the auth manager with config storage in user application support directory
-    public init() {
-        // Set up configuration storage path
-        let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let remindersDirectory = appSupportURL.appendingPathComponent("reminders-cli", isDirectory: true)
-        
-        // Create directory if it doesn't exist
-        try? FileManager.default.createDirectory(at: remindersDirectory, withIntermediateDirectories: true)
-        
-        // Set config file path
-        self.configURL = remindersDirectory.appendingPathComponent("auth_config.json")
-        
+    /// - Parameter configURL: Optional custom config file URL (for testing). Defaults to ~/Library/Application Support/reminders-cli/auth_config.json
+    public init(configURL: URL? = nil) {
+        if let customConfigURL = configURL {
+            // Use provided config URL (typically for testing)
+            self.configURL = customConfigURL
+
+            // Create parent directory if it doesn't exist
+            let parentDir = customConfigURL.deletingLastPathComponent()
+            try? FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
+        } else {
+            // Set up configuration storage path in default location
+            let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            let remindersDirectory = appSupportURL.appendingPathComponent("reminders-cli", isDirectory: true)
+
+            // Create directory if it doesn't exist
+            try? FileManager.default.createDirectory(at: remindersDirectory, withIntermediateDirectories: true)
+
+            // Set config file path
+            self.configURL = remindersDirectory.appendingPathComponent("auth_config.json")
+        }
+
         // Default to not requiring auth
         self.requireAuth = false
-        
-        Logger.shared.debug("AuthManager initialized with config at: \(configURL.path)")
-        
+
+        Logger.shared.debug("AuthManager initialized with config at: \(self.configURL.path)")
+
         // Load existing config
         loadConfig()
     }
     
     /// Initializes the auth manager with an environment variable or command line token
-    public init(token: String?, requireAuth: Bool = false) {
-        // Set up configuration storage path (same as default init)
-        let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let remindersDirectory = appSupportURL.appendingPathComponent("reminders-cli", isDirectory: true)
-        
-        // Create directory if it doesn't exist
-        try? FileManager.default.createDirectory(at: remindersDirectory, withIntermediateDirectories: true)
-        
-        // Set config file path
-        self.configURL = remindersDirectory.appendingPathComponent("auth_config.json")
-        
+    /// - Parameters:
+    ///   - token: The admin token to use
+    ///   - requireAuth: Whether authentication is required
+    ///   - configURL: Optional custom config file URL (for testing). Defaults to ~/Library/Application Support/reminders-cli/auth_config.json
+    public init(token: String?, requireAuth: Bool = false, configURL: URL? = nil) {
+        if let customConfigURL = configURL {
+            // Use provided config URL (typically for testing)
+            self.configURL = customConfigURL
+
+            // Create parent directory if it doesn't exist
+            let parentDir = customConfigURL.deletingLastPathComponent()
+            try? FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
+        } else {
+            // Set up configuration storage path in default location
+            let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            let remindersDirectory = appSupportURL.appendingPathComponent("reminders-cli", isDirectory: true)
+
+            // Create directory if it doesn't exist
+            try? FileManager.default.createDirectory(at: remindersDirectory, withIntermediateDirectories: true)
+
+            // Set config file path
+            self.configURL = remindersDirectory.appendingPathComponent("auth_config.json")
+        }
+
         // Set the admin token if provided
         self.adminToken = token
         self.requireAuth = requireAuth
-        
+
         Logger.shared.info("AuthManager initialized - token: \(token != nil ? "provided" : "none"), requireAuth: \(requireAuth)")
-        
+
         // Save config
         saveConfig()
     }

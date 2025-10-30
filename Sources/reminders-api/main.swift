@@ -831,10 +831,14 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
 // Helper function to fetch reminders from a specific list
 func fetchReminders(from listName: String, displayOptions: DisplayOptions, remindersService: Reminders) async throws -> [EKReminder] {
     return try await withCheckedThrowingContinuation { continuation in
-        let calendar = remindersService.calendar(withName: listName)
-        
-        remindersService.reminders(on: [calendar], displayOptions: displayOptions) { reminders in
-            continuation.resume(returning: reminders)
+        do {
+            let calendar = try remindersService.calendar(withName: listName)
+
+            remindersService.reminders(on: [calendar], displayOptions: displayOptions) { reminders in
+                continuation.resume(returning: reminders)
+            }
+        } catch {
+            continuation.resume(throwing: error)
         }
     }
 }
@@ -851,55 +855,63 @@ func fetchAllReminders(displayOptions: DisplayOptions, remindersService: Reminde
 }
 
 // Helper function to add a reminder
-func addReminder(title: String, notes: String?, listName: String, dueDateComponents: DateComponents?, 
+func addReminder(title: String, notes: String?, listName: String, dueDateComponents: DateComponents?,
                 priority: Priority, remindersService: Reminders) async throws -> EKReminder {
     return try await withCheckedThrowingContinuation { continuation in
-        let calendar = remindersService.calendar(withName: listName)
-        let reminder = remindersService.createReminder(
-            title: title,
-            notes: notes,
-            calendar: calendar,
-            dueDateComponents: dueDateComponents,
-            priority: priority
-        )
-        
-        continuation.resume(returning: reminder)
+        do {
+            let calendar = try remindersService.calendar(withName: listName)
+            let reminder = try remindersService.createReminder(
+                title: title,
+                notes: notes,
+                calendar: calendar,
+                dueDateComponents: dueDateComponents,
+                priority: priority
+            )
+
+            continuation.resume(returning: reminder)
+        } catch {
+            continuation.resume(throwing: error)
+        }
     }
 }
 
 // Helper function to delete a reminder
 func deleteReminder(id: String, listName: String, remindersService: Reminders) async throws {
     return try await withCheckedThrowingContinuation { continuation in
-        let calendar = remindersService.calendar(withName: listName)
-        
-        // Handle both formats (with and without the protocol prefix)
-        let prefix = "x-apple-reminder://"
-        let fullId = id.hasPrefix(prefix) ? id : "\(prefix)\(id)"
-        
-        remindersService.reminders(on: [calendar], displayOptions: .all) { reminders in
-            // Try with the fully qualified ID first
-            if let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == fullId }) {
-                do {
-                    try remindersService.deleteReminder(reminder)
-                    continuation.resume()
-                } catch {
-                    continuation.resume(throwing: HBHTTPError(.internalServerError, message: error.localizedDescription))
+        do {
+            let calendar = try remindersService.calendar(withName: listName)
+
+            // Handle both formats (with and without the protocol prefix)
+            let prefix = "x-apple-reminder://"
+            let fullId = id.hasPrefix(prefix) ? id : "\(prefix)\(id)"
+
+            remindersService.reminders(on: [calendar], displayOptions: .all) { reminders in
+                // Try with the fully qualified ID first
+                if let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == fullId }) {
+                    do {
+                        try remindersService.deleteReminder(reminder)
+                        continuation.resume()
+                    } catch {
+                        continuation.resume(throwing: HBHTTPError(.internalServerError, message: error.localizedDescription))
+                    }
+                    return
                 }
-                return
-            }
-            
-            // For backward compatibility, try with the original ID string
-            if let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == id }) {
-                do {
-                    try remindersService.deleteReminder(reminder)
-                    continuation.resume()
-                } catch {
-                    continuation.resume(throwing: HBHTTPError(.internalServerError, message: error.localizedDescription))
+
+                // For backward compatibility, try with the original ID string
+                if let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == id }) {
+                    do {
+                        try remindersService.deleteReminder(reminder)
+                        continuation.resume()
+                    } catch {
+                        continuation.resume(throwing: HBHTTPError(.internalServerError, message: error.localizedDescription))
+                    }
+                    return
                 }
-                return
+
+                continuation.resume(throwing: HBHTTPError(.notFound, message: "Reminder not found"))
             }
-            
-            continuation.resume(throwing: HBHTTPError(.notFound, message: "Reminder not found"))
+        } catch {
+            continuation.resume(throwing: error)
         }
     }
 }
@@ -907,36 +919,40 @@ func deleteReminder(id: String, listName: String, remindersService: Reminders) a
 // Helper function to mark a reminder as complete or incomplete
 func setReminderComplete(id: String, listName: String, complete: Bool, remindersService: Reminders) async throws {
     return try await withCheckedThrowingContinuation { continuation in
-        let calendar = remindersService.calendar(withName: listName)
+        do {
+            let calendar = try remindersService.calendar(withName: listName)
 
-        // Handle both formats (with and without the protocol prefix)
-        let prefix = "x-apple-reminder://"
-        let fullId = id.hasPrefix(prefix) ? id : "\(prefix)\(id)"
+            // Handle both formats (with and without the protocol prefix)
+            let prefix = "x-apple-reminder://"
+            let fullId = id.hasPrefix(prefix) ? id : "\(prefix)\(id)"
 
-        remindersService.reminders(on: [calendar], displayOptions: .all) { reminders in
-            // Try with the fully qualified ID first
-            if let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == fullId }) {
-                do {
-                    try remindersService.setReminderComplete(reminder, complete: complete)
-                    continuation.resume()
-                } catch {
-                    continuation.resume(throwing: HBHTTPError(.internalServerError, message: error.localizedDescription))
+            remindersService.reminders(on: [calendar], displayOptions: .all) { reminders in
+                // Try with the fully qualified ID first
+                if let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == fullId }) {
+                    do {
+                        try remindersService.setReminderComplete(reminder, complete: complete)
+                        continuation.resume()
+                    } catch {
+                        continuation.resume(throwing: HBHTTPError(.internalServerError, message: error.localizedDescription))
+                    }
+                    return
                 }
-                return
-            }
 
-            // For backward compatibility, try with the original ID string
-            if let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == id }) {
-                do {
-                    try remindersService.setReminderComplete(reminder, complete: complete)
-                    continuation.resume()
-                } catch {
-                    continuation.resume(throwing: HBHTTPError(.internalServerError, message: error.localizedDescription))
+                // For backward compatibility, try with the original ID string
+                if let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == id }) {
+                    do {
+                        try remindersService.setReminderComplete(reminder, complete: complete)
+                        continuation.resume()
+                    } catch {
+                        continuation.resume(throwing: HBHTTPError(.internalServerError, message: error.localizedDescription))
+                    }
+                    return
                 }
-                return
-            }
 
-            continuation.resume(throwing: HBHTTPError(.notFound, message: "Reminder not found"))
+                continuation.resume(throwing: HBHTTPError(.notFound, message: "Reminder not found"))
+            }
+        } catch {
+            continuation.resume(throwing: error)
         }
     }
 }
@@ -945,13 +961,14 @@ func setReminderComplete(id: String, listName: String, complete: Bool, reminders
 func updateReminder(id: String, listName: String, title: String?, notes: String?,
                    dueDateString: String?, priority: String?, remindersService: Reminders) async throws -> EKReminder {
     return try await withCheckedThrowingContinuation { continuation in
-        let calendar = remindersService.calendar(withName: listName)
+        do {
+            let calendar = try remindersService.calendar(withName: listName)
 
-        // Handle both formats (with and without the protocol prefix)
-        let prefix = "x-apple-reminder://"
-        let fullId = id.hasPrefix(prefix) ? id : "\(prefix)\(id)"
+            // Handle both formats (with and without the protocol prefix)
+            let prefix = "x-apple-reminder://"
+            let fullId = id.hasPrefix(prefix) ? id : "\(prefix)\(id)"
 
-        remindersService.reminders(on: [calendar], displayOptions: .all) { reminders in
+            remindersService.reminders(on: [calendar], displayOptions: .all) { reminders in
             // Try with the fully qualified ID first
             if let reminder = reminders.first(where: { $0.calendarItemExternalIdentifier == fullId }) {
                 // Update fields if provided
@@ -1021,6 +1038,9 @@ func updateReminder(id: String, listName: String, title: String?, notes: String?
             }
 
             continuation.resume(throwing: HBHTTPError(.notFound, message: "Reminder not found"))
+            }
+        } catch {
+            continuation.resume(throwing: error)
         }
     }
 }
@@ -1135,14 +1155,14 @@ func parseSearchParameters(_ request: HBRequest) -> SearchParameters {
 }
 
 // Helper function to resolve calendar by name or UUID
-func resolveCalendar(identifier: String, remindersService: Reminders) -> EKCalendar? {
+func resolveCalendar(identifier: String, remindersService: Reminders) throws -> EKCalendar? {
     // First try as UUID
     if let calendar = remindersService.calendar(withUUID: identifier) {
         return calendar
     }
-    
+
     // Then try as name
-    return remindersService.calendar(withName: identifier)
+    return try remindersService.calendar(withName: identifier)
 }
 
 // Search reminders based on provided parameters
@@ -1154,7 +1174,7 @@ func searchReminders(params: SearchParameters, remindersService: Reminders) asyn
         // Process lists parameter (unified names and UUIDs)
         if let lists = params.lists {
             for identifier in lists {
-                if let calendar = resolveCalendar(identifier: identifier, remindersService: remindersService),
+                if let calendar = try? resolveCalendar(identifier: identifier, remindersService: remindersService),
                    !calendarsToSearch.contains(where: { $0.calendarIdentifier == calendar.calendarIdentifier }) {
                     calendarsToSearch.append(calendar)
                 }
@@ -1164,7 +1184,7 @@ func searchReminders(params: SearchParameters, remindersService: Reminders) asyn
         // Process calendars parameter (unified names and UUIDs)
         if let calendars = params.calendars {
             for identifier in calendars {
-                if let calendar = resolveCalendar(identifier: identifier, remindersService: remindersService),
+                if let calendar = try? resolveCalendar(identifier: identifier, remindersService: remindersService),
                    !calendarsToSearch.contains(where: { $0.calendarIdentifier == calendar.calendarIdentifier }) {
                     calendarsToSearch.append(calendar)
                 }

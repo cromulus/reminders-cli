@@ -12,7 +12,14 @@ public enum Sort: String, Decodable, ExpressibleByArgument, CaseIterable {
         let comparison: (Date, Date) -> Bool = order == .ascending ? (<) : (>)
         switch self {
             case .none: return { _, _ in fatalError() }
-            case .creationDate: return { comparison($0.creationDate!, $1.creationDate!) }
+            case .creationDate: return {
+                switch ($0.creationDate, $1.creationDate) {
+                    case (.none, .none): return false
+                    case (.none, .some): return false
+                    case (.some, .none): return true
+                    case (.some(let date0), .some(let date1)): return comparison(date0, date1)
+                }
+            }
             case .dueDate: return {
                 switch ($0.dueDateComponents, $1.dueDateComponents) {
                     case (.none, .none): return false

@@ -14,7 +14,7 @@ private struct ShowLists: ParsableCommand {
     @Flag(help: "Show list UUIDs in addition to names")
     var showUUIDs = false
 
-    func run() {
+    func run() throws {
         reminders.showLists(outputFormat: format, showUUIDs: showUUIDs)
     }
 }
@@ -52,7 +52,7 @@ private struct ShowAll: ParsableCommand {
         }
     }
 
-    func run() {
+    func run() throws {
         var displayOptions = DisplayOptions.incomplete
         if self.onlyCompleted {
             displayOptions = .complete
@@ -88,7 +88,7 @@ private struct ShowSubtasks: ParsableCommand {
         }
     }
 
-    func run() {
+    func run() throws {
         var displayOptions = DisplayOptions.incomplete
         if self.onlyCompleted {
             displayOptions = .complete
@@ -148,7 +148,7 @@ private struct Show: ParsableCommand {
         }
     }
 
-    func run() {
+    func run() throws {
         var displayOptions = DisplayOptions.incomplete
         if self.onlyCompleted {
             displayOptions = .complete
@@ -156,7 +156,7 @@ private struct Show: ParsableCommand {
             displayOptions = .all
         }
 
-        reminders.showListItems(
+        try reminders.showListItems(
             withName: self.listName, dueOn: self.dueDate, includeOverdue: self.includeOverdue,
             displayOptions: displayOptions, outputFormat: format, sort: sort, sortOrder: sortOrder,
             showUUIDs: self.showUUIDs)
@@ -200,8 +200,8 @@ private struct Add: ParsableCommand {
     @Flag(help: "Show UUID of the created reminder")
     var showUUID = false
 
-    func run() {
-        reminders.addReminder(
+    func run() throws {
+        try reminders.addReminder(
             string: self.reminder.joined(separator: " "),
             notes: self.notes,
             toListNamed: self.listName,
@@ -225,8 +225,8 @@ private struct Complete: ParsableCommand {
         help: "The index or id of the reminder to delete, see 'show' for indexes")
     var index: String
 
-    func run() {
-        reminders.setComplete(true, itemAtIndex: self.index, onListNamed: self.listName)
+    func run() throws {
+        try reminders.setComplete(true, itemAtIndex: self.index, onListNamed: self.listName)
     }
 }
 
@@ -243,8 +243,8 @@ private struct Uncomplete: ParsableCommand {
         help: "The index or id of the reminder to delete, see 'show' for indexes")
     var index: String
 
-    func run() {
-        reminders.setComplete(false, itemAtIndex: self.index, onListNamed: self.listName)
+    func run() throws {
+        try reminders.setComplete(false, itemAtIndex: self.index, onListNamed: self.listName)
     }
 }
 
@@ -261,8 +261,8 @@ private struct Delete: ParsableCommand {
         help: "The index or id of the reminder to delete, see 'show' for indexes")
     var index: String
 
-    func run() {
-        reminders.delete(itemAtIndex: self.index, onListNamed: self.listName)
+    func run() throws {
+        try reminders.delete(itemAtIndex: self.index, onListNamed: self.listName)
     }
 }
 
@@ -301,9 +301,9 @@ private struct Edit: ParsableCommand {
         }
     }
 
-    func run() {
+    func run() throws {
         let newText = self.reminder.joined(separator: " ")
-        reminders.edit(
+        try reminders.edit(
             itemAtIndex: self.index,
             onListNamed: self.listName,
             newText: newText.isEmpty ? nil : newText,
@@ -326,8 +326,8 @@ private struct NewList: ParsableCommand {
         help: "The name of the source of the list, if all your lists use the same source it will default to that")
     var source: String?
 
-    func run() {
-        reminders.newList(with: self.listName, source: self.source)
+    func run() throws {
+        try reminders.newList(with: self.listName, source: self.source)
     }
 }
 
@@ -456,13 +456,13 @@ private struct ShowItem: ParsableCommand {
         }
     }
 
-    func run() {
+    func run() throws {
         if let index = index {
             // Show by list name + index
-            reminders.showItem(onListNamed: identifier, atIndex: index, outputFormat: format)
+            try reminders.showItem(onListNamed: identifier, atIndex: index, outputFormat: format)
         } else {
             // Show by UUID
-            reminders.showItem(withUUID: identifier, outputFormat: format)
+            try reminders.showItem(withUUID: identifier, outputFormat: format)
         }
     }
 }
@@ -480,8 +480,8 @@ private struct Move: ParsableCommand {
     @Argument(help: "Target list name")
     var targetList: String
 
-    func run() {
-        reminders.moveReminder(
+    func run() throws {
+        try reminders.moveReminder(
             identifier: reminderIdentifier,
             fromList: sourceList,
             toList: targetList)
@@ -504,15 +504,15 @@ private struct SetPriority: ParsableCommand {
     @Flag(help: "Treat first argument as UUID instead of list name")
     var uuid = false
 
-    func run() {
+    func run() throws {
         if uuid {
-            reminders.setPriority(priority, forReminderWithUUID: listOrUUID)
+            try reminders.setPriority(priority, forReminderWithUUID: listOrUUID)
         } else {
             guard let index = index else {
                 print("Index is required when not using --uuid")
                 Foundation.exit(1)
             }
-            reminders.setPriority(priority, 
+            try reminders.setPriority(priority, 
                                 onListNamed: listOrUUID, 
                                 atIndex: index)
         }
@@ -541,15 +541,15 @@ private struct AddUrl: ParsableCommand {
         }
     }
 
-    func run() {
+    func run() throws {
         if uuid {
-            reminders.addURL(url, toReminderWithUUID: listOrUUID)
+            try reminders.addURL(url, toReminderWithUUID: listOrUUID)
         } else {
             guard let index = index else {
                 print("Index is required when not using --uuid")
                 Foundation.exit(1)
             }
-            reminders.addURL(url, 
+            try reminders.addURL(url, 
                            onListNamed: listOrUUID, 
                            atIndex: index)
         }
@@ -578,7 +578,7 @@ private struct MakeSubtask: ParsableCommand {
     @Flag(help: "Treat parent argument as UUID")
     var parentUuid = false
 
-    func run() {
+    func run() throws {
         reminders.makeSubtask(
             childList: childUuid ? nil : childListOrUUID,
             childIndex: childUuid ? nil : childIndex,

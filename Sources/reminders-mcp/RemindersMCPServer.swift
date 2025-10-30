@@ -127,7 +127,7 @@ public class RemindersMCPServer {
         }
 
         // Create list
-        reminders.newList(with: name, source: source)
+        try reminders.newList(with: name, source: source)
 
         // Return created list
         guard let calendar = reminders.getCalendars().first(where: { $0.title == name }) else {
@@ -154,42 +154,79 @@ public class RemindersMCPServer {
 
     // MARK: - Reminders Tools
 
-    /// Create a new reminder
+    /// Create a new reminder with smart parsing
     /// - Parameters:
-    ///   - list: List name or UUID
-    ///   - title: Reminder title
+    ///   - list: List name or UUID (can also be extracted from title using @listname)
+    ///   - title: Reminder title. Supports metadata markers:
+    ///     - `!!!`, `!!`, `!` or `^priority` for priority (e.g., `^high`, `^urgent`, `!!!`)
+    ///     - `@listname` for list (if list param not provided)
+    ///     - `#tag` for tags (future use)
+    ///     - Natural language dates (e.g., "tomorrow", "next friday", "in 3 days")
     ///   - notes: Optional notes
-    ///   - dueDate: Optional ISO8601 due date (e.g., "2025-10-20T14:00:00Z")
-    ///   - priority: Priority level: "none", "low", "medium", or "high" (default: "none")
-    ///     - none: No priority (0)
-    ///     - high: High priority (1-4, 1 is highest)
-    ///     - medium: Medium priority (5)
-    ///     - low: Low priority (6-9, 9 is lowest)
+    ///   - dueDate: Optional due date. Supports:
+    ///     - ISO8601 format (e.g., "2025-10-20T14:00:00Z")
+    ///     - Natural language (e.g., "tomorrow", "next friday 9pm", "in 3 days")
+    ///   - priority: Priority level. Supports:
+    ///     - Symbols: "!!!", "!!", "!" or ""
+    ///     - Words: "high"/"urgent"/"critical", "medium"/"important", "low"/"normal", "none"
+    ///     - Numbers: "3" (high), "2" (medium), "1" (low), "0" (none)
+    ///     - Caret format: "^high", "^2", etc.
+    /// - Note: Explicit parameters override metadata extracted from title
     @MCPTool
     public func reminders_create(
-        list: String,
+        list: String? = nil,
         title: String,
         notes: String? = nil,
         dueDate: String? = nil,
-        priority: String = "none"
+        priority: String? = nil
     ) async throws -> ReminderResponse {
-        log("Creating reminder: \(title) in list: \(list)")
+        log("Creating reminder with smart parsing: \(title)")
 
-        let calendar = try resolveCalendar(list)
-        let priorityEnum = Priority(rawValue: priority) ?? .none
+        // Parse title for metadata
+        let metadata = TitleParser.parse(title)
 
+        // Determine list: explicit param > extracted from title > error
+        let listIdentifier: String
+        if let explicitList = list {
+            listIdentifier = explicitList
+        } else if let extractedList = metadata.listName {
+            listIdentifier = extractedList
+        } else {
+            throw RemindersMCPError.invalidArguments("Must provide list parameter or @listname in title")
+        }
+
+        let calendar = try resolveCalendar(listIdentifier)
+
+        // Determine priority: explicit param > extracted from title > none
+        let priorityEnum: Priority
+        if let explicitPriority = priority {
+            priorityEnum = Priority(fromString: explicitPriority) ?? .none
+        } else if let extractedPriority = metadata.priority {
+            priorityEnum = extractedPriority
+        } else {
+            priorityEnum = .none
+        }
+
+        // Determine due date: explicit param > extracted from title > nil
         var dueDateComponents: DateComponents? = nil
         if let dueDateStr = dueDate {
-            if let date = isoDateFormatter.date(from: dueDateStr) {
+            // Try natural language first
+            if let naturalDate = DateComponents(argument: dueDateStr) {
+                dueDateComponents = naturalDate
+            }
+            // Fall back to ISO8601
+            else if let date = isoDateFormatter.date(from: dueDateStr) {
                 dueDateComponents = Calendar.current.dateComponents(
                     [.year, .month, .day, .hour, .minute],
                     from: date
                 )
             }
+        } else if let extractedDate = metadata.dueDate {
+            dueDateComponents = extractedDate
         }
 
-        let reminder = reminders.createReminder(
-            title: title,
+        let reminder = try reminders.createReminder(
+            title: metadata.cleanedTitle,
             notes: notes,
             calendar: calendar,
             dueDateComponents: dueDateComponents,
@@ -209,17 +246,13 @@ public class RemindersMCPServer {
         return ReminderResponse(reminder: reminder)
     }
 
-    /// Update a reminder
+    /// Update a reminder with smart parsing
     /// - Parameters:
     ///   - uuid: Reminder UUID
-    ///   - title: New title (optional)
+    ///   - title: New title (optional). Supports metadata markers (priority symbols/dates extracted if not overridden by explicit params)
     ///   - notes: New notes (optional)
-    ///   - dueDate: New ISO8601 due date (optional)
-    ///   - priority: New priority: "none", "low", "medium", or "high" (optional)
-    ///     - none: No priority (0)
-    ///     - high: High priority (1-4, 1 is highest)
-    ///     - medium: Medium priority (5)
-    ///     - low: Low priority (6-9, 9 is lowest)
+    ///   - dueDate: New due date (optional). Supports natural language (e.g., "tomorrow", "next friday") and ISO8601
+    ///   - priority: New priority (optional). Supports symbols (!!!, !!, !), words (high, medium, low, none), numbers (0-3), and caret format (^high)
     ///   - isCompleted: Completion status (optional)
     @MCPTool
     public func reminders_update(
@@ -230,20 +263,44 @@ public class RemindersMCPServer {
         priority: String? = nil,
         isCompleted: Bool? = nil
     ) async throws -> ReminderResponse {
-        log("Updating reminder: \(uuid)")
+        log("Updating reminder with smart parsing: \(uuid)")
 
         let reminder = try resolveReminder(uuid: uuid)
 
-        if let title { reminder.title = title }
+        // If title is provided, parse it for metadata
+        if let title {
+            let metadata = TitleParser.parse(title)
+            reminder.title = metadata.cleanedTitle
+
+            // Apply extracted priority if no explicit priority param was provided
+            if priority == nil, let extractedPriority = metadata.priority {
+                reminder.priority = Int(extractedPriority.value.rawValue)
+            }
+
+            // Apply extracted due date if no explicit dueDate param was provided
+            if dueDate == nil, let extractedDate = metadata.dueDate {
+                reminder.dueDateComponents = extractedDate
+            }
+        }
+
         if let notes { reminder.notes = notes }
         if let isCompleted { reminder.isCompleted = isCompleted }
 
-        if let priorityStr = priority, let priorityEnum = Priority(rawValue: priorityStr) {
-            reminder.priority = Int(priorityEnum.value.rawValue)
+        // Handle explicit priority parameter with flexible parsing
+        if let priorityStr = priority {
+            if let priorityEnum = Priority(fromString: priorityStr) {
+                reminder.priority = Int(priorityEnum.value.rawValue)
+            }
         }
 
+        // Handle explicit due date parameter with natural language support
         if let dueDateStr = dueDate {
-            if let date = isoDateFormatter.date(from: dueDateStr) {
+            // Try natural language first
+            if let naturalDate = DateComponents(argument: dueDateStr) {
+                reminder.dueDateComponents = naturalDate
+            }
+            // Fall back to ISO8601
+            else if let date = isoDateFormatter.date(from: dueDateStr) {
                 reminder.dueDateComponents = Calendar.current.dateComponents(
                     [.year, .month, .day, .hour, .minute],
                     from: date

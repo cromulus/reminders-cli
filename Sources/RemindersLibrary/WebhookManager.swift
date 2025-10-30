@@ -102,9 +102,18 @@ public struct WebhookConfig: Codable {
     public let filter: WebhookFilter
     public var isActive: Bool
     public var name: String
-    
+
     public init(url: URL, filter: WebhookFilter, name: String = "Untitled Webhook", isActive: Bool = true) {
         self.id = UUID()
+        self.url = url
+        self.filter = filter
+        self.isActive = isActive
+        self.name = name
+    }
+
+    // Internal initializer that preserves the UUID (for updates)
+    internal init(id: UUID, url: URL, filter: WebhookFilter, name: String, isActive: Bool) {
+        self.id = id
         self.url = url
         self.filter = filter
         self.isActive = isActive
@@ -208,7 +217,10 @@ public class WebhookManager {
     private let configURL: URL
     private let remindersService: Reminders
     private var previousReminders: [String: EKReminder] = [:]
-    
+
+    // Serial queue for protecting access to webhooks and previousReminders
+    private let stateQueue = DispatchQueue(label: "com.reminders-cli.webhook-state")
+
     // Queue for webhook delivery to avoid blocking main thread
     private let webhookQueue = DispatchQueue(label: "com.reminders-cli.webhook-delivery", attributes: .concurrent)
     
@@ -249,88 +261,74 @@ public class WebhookManager {
     }
     
     // MARK: - Configuration Management
-    
+
     public func addWebhook(url: URL, filter: WebhookFilter, name: String) -> WebhookConfig {
-        let config = WebhookConfig(url: url, filter: filter, name: name)
-        webhooks.append(config)
-        saveConfigurations()
-        Logger.shared.info("Added webhook: \(name) -> \(url)")
-        return config
-    }
-    
-    public func updateWebhook(id: UUID, isActive: Bool? = nil, filter: WebhookFilter? = nil, url: URL? = nil, name: String? = nil) -> Bool {
-        guard let index = webhooks.firstIndex(where: { $0.id == id }) else {
-            Logger.shared.warn("Attempted to update non-existent webhook: \(id)")
-            return false
-        }
-        
-        var config = webhooks[index]
-        Logger.shared.debug("Updating webhook: \(config.name)")
-        
-        if let isActive = isActive {
-            config.isActive = isActive
-        }
-        
-        if let name = name {
-            config.name = name
-        }
-        
-        // If we have new filter or URL, create a new config
-        if let filter = filter, let url = url {
-            webhooks[index] = WebhookConfig(
-                url: url,
-                filter: filter,
-                name: name ?? config.name,
-                isActive: isActive ?? config.isActive
-            )
-        } else if let filter = filter {
-            webhooks[index] = WebhookConfig(
-                url: config.url,
-                filter: filter,
-                name: name ?? config.name,
-                isActive: isActive ?? config.isActive
-            )
-        } else if let url = url {
-            webhooks[index] = WebhookConfig(
-                url: url,
-                filter: config.filter,
-                name: name ?? config.name,
-                isActive: isActive ?? config.isActive
-            )
-        } else {
-            webhooks[index] = config
-        }
-        
-        saveConfigurations()
-        Logger.shared.info("Updated webhook: \(webhooks[index].name)")
-        return true
-    }
-    
-    public func removeWebhook(id: UUID) -> Bool {
-        let initialCount = webhooks.count
-        if let webhook = webhooks.first(where: { $0.id == id }) {
-            Logger.shared.info("Removing webhook: \(webhook.name)")
-        }
-        
-        webhooks.removeAll { $0.id == id }
-        let removed = initialCount != webhooks.count
-        
-        if removed {
+        return stateQueue.sync {
+            let config = WebhookConfig(url: url, filter: filter, name: name)
+            webhooks.append(config)
             saveConfigurations()
-            Logger.shared.debug("Webhook removed successfully")
-        } else {
-            Logger.shared.warn("Attempted to remove non-existent webhook: \(id)")
+            Logger.shared.info("Added webhook: \(name) -> \(url)")
+            return config
         }
-        
-        return removed
     }
-    
+
+    public func updateWebhook(id: UUID, isActive: Bool? = nil, filter: WebhookFilter? = nil, url: URL? = nil, name: String? = nil) -> Bool {
+        return stateQueue.sync {
+            guard let index = webhooks.firstIndex(where: { $0.id == id }) else {
+                Logger.shared.warn("Attempted to update non-existent webhook: \(id)")
+                return false
+            }
+
+            let config = webhooks[index]
+            Logger.shared.debug("Updating webhook: \(config.name)")
+
+            // Preserve the UUID when updating by using the internal initializer
+            let updatedConfig = WebhookConfig(
+                id: config.id,  // Preserve original UUID
+                url: url ?? config.url,
+                filter: filter ?? config.filter,
+                name: name ?? config.name,
+                isActive: isActive ?? config.isActive
+            )
+
+            webhooks[index] = updatedConfig
+            saveConfigurations()
+            Logger.shared.info("Updated webhook: \(webhooks[index].name)")
+            return true
+        }
+    }
+
+    public func removeWebhook(id: UUID) -> Bool {
+        return stateQueue.sync {
+            let initialCount = webhooks.count
+            if let webhook = webhooks.first(where: { $0.id == id }) {
+                Logger.shared.info("Removing webhook: \(webhook.name)")
+            }
+
+            webhooks.removeAll { $0.id == id }
+            let removed = initialCount != webhooks.count
+
+            if removed {
+                saveConfigurations()
+                Logger.shared.debug("Webhook removed successfully")
+            } else {
+                Logger.shared.warn("Attempted to remove non-existent webhook: \(id)")
+            }
+
+            return removed
+        }
+    }
+
     public func getWebhooks() -> [WebhookConfig] {
-        return webhooks
+        return stateQueue.sync {
+            return webhooks
+        }
     }
-    
+
     public func getWebhook(id: UUID) -> WebhookConfig? {
-        return webhooks.first { $0.id == id }
+        return stateQueue.sync {
+            return webhooks.first { $0.id == id }
+        }
     }
     
     // MARK: - EventKit Notification Handling
@@ -354,102 +352,112 @@ public class WebhookManager {
     private func updatePreviousRemindersState() {
         let group = DispatchGroup()
         group.enter()
-        
+
         remindersService.reminders(on: remindersService.getCalendars(), displayOptions: .all) { reminders in
-            // Reset the previous state
-            self.previousReminders = [:]
-            
-            // Store all current reminders by UUID for future reference
-            for reminder in reminders {
-                if let uuid = reminder.calendarItemExternalIdentifier {
-                    self.previousReminders[uuid] = reminder
+            self.stateQueue.sync {
+                // Reset the previous state
+                self.previousReminders = [:]
+
+                // Store all current reminders by UUID for future reference
+                for reminder in reminders {
+                    if let uuid = reminder.calendarItemExternalIdentifier {
+                        self.previousReminders[uuid] = reminder
+                    }
                 }
             }
-            
+
             group.leave()
         }
-        
+
         // Wait with timeout (5 seconds)
         _ = group.wait(timeout: .now() + 5)
     }
     
     private func processChangedReminders(reminders: [EKReminder]) {
-        // Current reminders mapped by UUID
-        var currentReminders: [String: EKReminder] = [:]
-        for reminder in reminders {
-            if let uuid = reminder.calendarItemExternalIdentifier {
-                currentReminders[uuid] = reminder
-            }
-        }
-        
-        // Detect created, updated, deleted, completed, and uncompleted reminders
-        var created: [EKReminder] = []
-        var updated: [EKReminder] = []
-        var deleted: [String: EKReminder] = [:]
-        var completed: [EKReminder] = []
-        var uncompleted: [EKReminder] = []
-        
-        // Check for created and updated reminders
-        for (uuid, reminder) in currentReminders {
-            if let previousReminder = previousReminders[uuid] {
-                // Check if reminder was updated
-                if reminder.lastModifiedDate != previousReminder.lastModifiedDate {
-                    updated.append(reminder)
-                    
-                    // Check for completion status change
-                    if reminder.isCompleted && !previousReminder.isCompleted {
-                        completed.append(reminder)
-                    } else if !reminder.isCompleted && previousReminder.isCompleted {
-                        uncompleted.append(reminder)
-                    }
+        stateQueue.sync {
+            // Current reminders mapped by UUID
+            var currentReminders: [String: EKReminder] = [:]
+            for reminder in reminders {
+                if let uuid = reminder.calendarItemExternalIdentifier {
+                    currentReminders[uuid] = reminder
                 }
-            } else {
-                // This is a new reminder
-                created.append(reminder)
             }
-        }
-        
-        // Check for deleted reminders
-        for (uuid, reminder) in previousReminders {
-            if currentReminders[uuid] == nil {
-                deleted[uuid] = reminder
+
+            // Detect created, updated, deleted, completed, and uncompleted reminders
+            var created: [EKReminder] = []
+            var updated: [EKReminder] = []
+            var deleted: [String: EKReminder] = [:]
+            var completed: [EKReminder] = []
+            var uncompleted: [EKReminder] = []
+
+            // Check for created and updated reminders
+            for (uuid, reminder) in currentReminders {
+                if let previousReminder = previousReminders[uuid] {
+                    // Check if reminder was updated
+                    if reminder.lastModifiedDate != previousReminder.lastModifiedDate {
+                        updated.append(reminder)
+
+                        // Check for completion status change
+                        if reminder.isCompleted && !previousReminder.isCompleted {
+                            completed.append(reminder)
+                        } else if !reminder.isCompleted && previousReminder.isCompleted {
+                            uncompleted.append(reminder)
+                        }
+                    }
+                } else {
+                    // This is a new reminder
+                    created.append(reminder)
+                }
             }
+
+            // Check for deleted reminders
+            for (uuid, reminder) in previousReminders {
+                if currentReminders[uuid] == nil {
+                    deleted[uuid] = reminder
+                }
+            }
+
+            // Dispatch webhooks for each type of event
+            // Note: dispatching happens outside the critical section to avoid holding the lock
+
+            // Handle created reminders
+            for reminder in created {
+                dispatchWebhooks(for: reminder, event: .created)
+            }
+
+            // Handle updated reminders
+            for reminder in updated {
+                dispatchWebhooks(for: reminder, event: .updated)
+            }
+
+            // Handle deleted reminders
+            for (_, reminder) in deleted {
+                dispatchWebhooks(for: reminder, event: .deleted)
+            }
+
+            // Handle completed reminders
+            for reminder in completed {
+                dispatchWebhooks(for: reminder, event: .completed)
+            }
+
+            // Handle uncompleted reminders
+            for reminder in uncompleted {
+                dispatchWebhooks(for: reminder, event: .uncompleted)
+            }
+
+            // Update our previous state for next comparison
+            previousReminders = currentReminders
         }
-        
-        // Dispatch webhooks for each type of event
-        
-        // Handle created reminders
-        for reminder in created {
-            dispatchWebhooks(for: reminder, event: .created)
-        }
-        
-        // Handle updated reminders
-        for reminder in updated {
-            dispatchWebhooks(for: reminder, event: .updated)
-        }
-        
-        // Handle deleted reminders
-        for (_, reminder) in deleted {
-            dispatchWebhooks(for: reminder, event: .deleted)
-        }
-        
-        // Handle completed reminders
-        for reminder in completed {
-            dispatchWebhooks(for: reminder, event: .completed)
-        }
-        
-        // Handle uncompleted reminders
-        for reminder in uncompleted {
-            dispatchWebhooks(for: reminder, event: .uncompleted)
-        }
-        
-        // Update our previous state for next comparison
-        previousReminders = currentReminders
     }
     
     private func dispatchWebhooks(for reminder: EKReminder, event: WebhookEvent) {
+        // Get a snapshot of active webhooks (thread-safe)
+        let activeWebhooks = stateQueue.sync {
+            return webhooks.filter { $0.isActive }
+        }
+
         // For each active webhook configuration
-        for webhook in webhooks where webhook.isActive {
+        for webhook in activeWebhooks {
             // Check if this reminder matches the webhook's filter criteria
             if webhook.filter.matches(reminder: reminder, remindersService: self.remindersService) {
                 // If it matches, send the webhook
@@ -490,6 +498,7 @@ public class WebhookManager {
     // MARK: - Configuration Persistence
     
     private func saveConfigurations() {
+        // Note: This is called from within stateQueue.sync blocks, so no additional locking needed
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted]
@@ -499,17 +508,19 @@ public class WebhookManager {
             print("Error saving webhook configurations: \(error.localizedDescription)")
         }
     }
-    
+
     private func loadConfigurations() {
-        do {
-            if FileManager.default.fileExists(atPath: configURL.path) {
-                let data = try Data(contentsOf: configURL)
-                webhooks = try JSONDecoder().decode([WebhookConfig].self, from: data)
+        stateQueue.sync {
+            do {
+                if FileManager.default.fileExists(atPath: configURL.path) {
+                    let data = try Data(contentsOf: configURL)
+                    webhooks = try JSONDecoder().decode([WebhookConfig].self, from: data)
+                }
+            } catch {
+                print("Error loading webhook configurations: \(error.localizedDescription)")
+                // Start with empty configuration if loading fails
+                webhooks = []
             }
-        } catch {
-            print("Error loading webhook configurations: \(error.localizedDescription)")
-            // Start with empty configuration if loading fails
-            webhooks = []
         }
     }
 }
