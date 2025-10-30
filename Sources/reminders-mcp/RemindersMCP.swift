@@ -32,19 +32,24 @@ struct RemindersMCP: AsyncParsableCommand {
     var token: String?
 
     func run() async throws {
-        print("Requesting Reminders access...")
+        // For stdio, all status messages go to stderr to avoid corrupting JSON-RPC on stdout
+        let log: (String) -> Void = { message in
+            fputs("\(message)\n", stderr)
+        }
+
+        log("Requesting Reminders access...")
         let (granted, error) = Reminders.requestAccess()
 
         guard granted else {
-            print("Error: Reminders access denied")
+            log("Error: Reminders access denied")
             if let error {
-                print("Error: \(error.localizedDescription)")
+                log("Error: \(error.localizedDescription)")
             }
-            print("Grant access in System Preferences > Privacy & Security > Reminders")
+            log("Grant access in System Preferences > Privacy & Security > Reminders")
             throw ExitCode.failure
         }
 
-        print("Reminders access granted")
+        log("Reminders access granted")
 
         // Create MCP server
         let server = RemindersMCPServer(verbose: verbose)
@@ -52,12 +57,12 @@ struct RemindersMCP: AsyncParsableCommand {
         // Start appropriate transport
         switch transport {
         case .stdio:
-            print("Starting MCP server with stdio transport...")
+            log("Starting MCP server with stdio transport...")
             let transport = StdioTransport(server: server)
             try await transport.run()
 
         case .httpsse:
-            print("Starting MCP server with HTTP+SSE transport on \(hostname):\(port)...")
+            log("Starting MCP server with HTTP+SSE transport on \(hostname):\(port)...")
             let transport = HTTPSSETransport(server: server, port: port)
 
             // Add bearer token authentication if provided
@@ -68,7 +73,7 @@ struct RemindersMCP: AsyncParsableCommand {
                     }
                     return .authorized
                 }
-                print("Bearer token authentication enabled")
+                log("Bearer token authentication enabled")
             }
 
             try await transport.run()
