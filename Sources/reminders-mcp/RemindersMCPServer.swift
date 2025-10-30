@@ -67,6 +67,24 @@ public struct SuccessResponse: Encodable {
     public let success: Bool
 }
 
+public struct OverviewResponse: Encodable {
+    public let totalReminders: Int
+    public let completedCount: Int
+    public let incompleteCount: Int
+    public let overdueCount: Int
+    public let dueTodayCount: Int
+    public let dueThisWeekCount: Int
+    public let byPriority: [String: Int]
+    public let byList: [String: Int]
+}
+
+public struct BulkOperationResponse: Encodable {
+    public let success: Bool
+    public let processedCount: Int
+    public let failedCount: Int
+    public let errors: [String]
+}
+
 // MARK: - MCP Server
 
 @MCPServer
@@ -142,7 +160,11 @@ public class RemindersMCPServer {
     ///   - title: Reminder title
     ///   - notes: Optional notes
     ///   - dueDate: Optional ISO8601 due date (e.g., "2025-10-20T14:00:00Z")
-    ///   - priority: Priority level: none, low, medium, or high
+    ///   - priority: Priority level: "none", "low", "medium", or "high" (default: "none")
+    ///     - none: No priority (0)
+    ///     - high: High priority (1-4, 1 is highest)
+    ///     - medium: Medium priority (5)
+    ///     - low: Low priority (6-9, 9 is lowest)
     @MCPTool
     public func reminders_create(
         list: String,
@@ -193,7 +215,11 @@ public class RemindersMCPServer {
     ///   - title: New title (optional)
     ///   - notes: New notes (optional)
     ///   - dueDate: New ISO8601 due date (optional)
-    ///   - priority: New priority: none, low, medium, or high (optional)
+    ///   - priority: New priority: "none", "low", "medium", or "high" (optional)
+    ///     - none: No priority (0)
+    ///     - high: High priority (1-4, 1 is highest)
+    ///     - medium: Medium priority (5)
+    ///     - low: Low priority (6-9, 9 is lowest)
     ///   - isCompleted: Completion status (optional)
     @MCPTool
     public func reminders_update(
@@ -287,10 +313,14 @@ public class RemindersMCPServer {
 
     /// Search reminders with filters
     /// - Parameters:
-    ///   - query: Text search in title and notes
+    ///   - query: Text search in title and notes (searches both fields)
     ///   - lists: Filter by list names or UUIDs
     ///   - completed: Filter by completion status: "all", "true", or "false"
-    ///   - priority: Filter by priority levels (array of: none, low, medium, high)
+    ///   - priority: Filter by priority levels (array of: "none", "low", "medium", "high")
+    ///     - none: No priority (0)
+    ///     - high: High priority (1-4)
+    ///     - medium: Medium priority (5)
+    ///     - low: Low priority (6-9)
     ///   - dueBefore: Filter by due date before this ISO8601 date
     ///   - dueAfter: Filter by due date after this ISO8601 date
     ///   - hasNotes: Filter by presence of notes
@@ -410,6 +440,156 @@ public class RemindersMCPServer {
         }
 
         return SearchResponse(reminders: filtered, count: filtered.count)
+    }
+
+    // MARK: - Overview & Bulk Operations
+
+    /// Get overview of all reminders with counts and summaries
+    /// Returns total counts, overdue, due today/this week, grouped by priority and list
+    @MCPTool
+    public func reminders_get_overview() async throws -> OverviewResponse {
+        log("Getting reminders overview")
+
+        let calendars = reminders.getCalendars()
+        let allReminders = try await fetchReminders(on: calendars, display: .all)
+
+        let now = Date()
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: now)
+        let todayEnd = calendar.date(byAdding: .day, value: 1, to: todayStart)!
+        let weekEnd = calendar.date(byAdding: .day, value: 7, to: todayStart)!
+
+        let completedCount = allReminders.filter { $0.isCompleted }.count
+        let incompleteCount = allReminders.count - completedCount
+
+        // Count overdue (incomplete + due date in past)
+        let overdueCount = allReminders.filter { reminder in
+            !reminder.isCompleted &&
+            reminder.dueDateComponents?.date != nil &&
+            reminder.dueDateComponents!.date! < now
+        }.count
+
+        // Count due today
+        let dueTodayCount = allReminders.filter { reminder in
+            guard let dueDate = reminder.dueDateComponents?.date else { return false }
+            return dueDate >= todayStart && dueDate < todayEnd
+        }.count
+
+        // Count due this week
+        let dueThisWeekCount = allReminders.filter { reminder in
+            guard let dueDate = reminder.dueDateComponents?.date else { return false }
+            return dueDate >= todayStart && dueDate < weekEnd
+        }.count
+
+        // Group by priority
+        var byPriority: [String: Int] = ["none": 0, "low": 0, "medium": 0, "high": 0]
+        for reminder in allReminders {
+            let priorityName: String
+            switch reminder.priority {
+            case 0: priorityName = "none"
+            case 1...4: priorityName = "high"
+            case 5: priorityName = "medium"
+            case 6...9: priorityName = "low"
+            default: priorityName = "none"
+            }
+            byPriority[priorityName, default: 0] += 1
+        }
+
+        // Group by list
+        var byList: [String: Int] = [:]
+        for reminder in allReminders {
+            let listName = reminder.calendar.title
+            byList[listName, default: 0] += 1
+        }
+
+        return OverviewResponse(
+            totalReminders: allReminders.count,
+            completedCount: completedCount,
+            incompleteCount: incompleteCount,
+            overdueCount: overdueCount,
+            dueTodayCount: dueTodayCount,
+            dueThisWeekCount: dueThisWeekCount,
+            byPriority: byPriority,
+            byList: byList
+        )
+    }
+
+    /// Mark multiple reminders as complete by UUID array
+    /// - Parameter uuids: Array of reminder UUIDs to mark as complete
+    @MCPTool
+    public func reminders_bulk_complete(uuids: [String]) async throws -> BulkOperationResponse {
+        log("Bulk completing \(uuids.count) reminders")
+
+        var processedCount = 0
+        var failedCount = 0
+        var errors: [String] = []
+
+        for uuid in uuids {
+            do {
+                let reminder = try resolveReminder(uuid: uuid)
+                try reminders.setReminderComplete(reminder, complete: true)
+                processedCount += 1
+            } catch {
+                failedCount += 1
+                errors.append("Failed to complete \(uuid): \(error.localizedDescription)")
+            }
+        }
+
+        return BulkOperationResponse(
+            success: failedCount == 0,
+            processedCount: processedCount,
+            failedCount: failedCount,
+            errors: errors
+        )
+    }
+
+    /// Update multiple reminders at once
+    /// - Parameters:
+    ///   - uuids: Array of reminder UUIDs to update
+    ///   - priority: New priority for all reminders: "none", "low", "medium", or "high" (optional)
+    ///     - none: No priority (0)
+    ///     - high: High priority (1-4)
+    ///     - medium: Medium priority (5)
+    ///     - low: Low priority (6-9)
+    ///   - isCompleted: New completion status for all reminders (optional)
+    @MCPTool
+    public func reminders_bulk_update(
+        uuids: [String],
+        priority: String? = nil,
+        isCompleted: Bool? = nil
+    ) async throws -> BulkOperationResponse {
+        log("Bulk updating \(uuids.count) reminders")
+
+        var processedCount = 0
+        var failedCount = 0
+        var errors: [String] = []
+
+        for uuid in uuids {
+            do {
+                let reminder = try resolveReminder(uuid: uuid)
+
+                if let isCompleted = isCompleted {
+                    reminder.isCompleted = isCompleted
+                }
+
+                if let priorityStr = priority, let priorityEnum = Priority(rawValue: priorityStr) {
+                    reminder.priority = Int(priorityEnum.value.rawValue)
+                }
+
+                try reminders.updateReminder(reminder)
+                processedCount += 1
+            } catch {
+                failedCount += 1
+                errors.append("Failed to update \(uuid): \(error.localizedDescription)")
+            }
+        }
+
+        return BulkOperationResponse(
+            success: failedCount == 0,
+            processedCount: processedCount,
+            failedCount: failedCount,
+            errors: errors
+        )
     }
 
     // MARK: - Helper Methods
