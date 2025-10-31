@@ -505,8 +505,21 @@ struct FilterExpression {
         for op in operators {
             if let range = workingStr.range(of: " \(op.rawValue) ", options: .caseInsensitive) {
                 let field = String(workingStr[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
-                let value = String(workingStr[range.upperBound...]).trimmingCharacters(in: .whitespaces)
-                    .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+                var value = String(workingStr[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+
+                // Strip brackets and parentheses for IN/NOT IN operators
+                if op == .in || op == .notIn {
+                    value = value.trimmingCharacters(in: CharacterSet(charactersIn: "[]()"))
+                }
+
+                // Remove surrounding quotes from all values
+                value = value.trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
+
+                // For IN operator, also remove quotes from internal comma-separated values
+                if op == .in || op == .notIn {
+                    value = value.replacingOccurrences(of: "'", with: "")
+                    value = value.replacingOccurrences(of: "\"", with: "")
+                }
 
                 return FilterCondition(field: field, op: op, value: value, negate: negate)
             }
@@ -515,7 +528,10 @@ struct FilterExpression {
             if op == .equals || op == .notEquals || op == .lessThan || op == .greaterThan {
                 if let range = workingStr.range(of: op.rawValue, options: .caseInsensitive) {
                     let field = String(workingStr[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
-                    let value = String(workingStr[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+                    var value = String(workingStr[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+
+                    // Remove surrounding quotes
+                    value = value.trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
 
                     if !field.isEmpty && !value.isEmpty {
                         return FilterCondition(field: field, op: op, value: value, negate: negate)
