@@ -32,8 +32,14 @@ struct RemindersMCP: AsyncParsableCommand {
     var token: String?
 
     func run() async throws {
-        // For stdio, all status messages go to stderr to avoid corrupting JSON-RPC on stdout
+        // Suppress startup chatter for stdio (MCP transports interpret stdout/stderr strictly)
+        // Allow verbose logging everywhere else, or when explicitly requested.
+        let transportMode = transport
         let log: (String) -> Void = { message in
+            guard self.verbose || transportMode != .stdio else { return }
+            fputs("\(message)\n", stderr)
+        }
+        let criticalLog: (String) -> Void = { message in
             fputs("\(message)\n", stderr)
         }
 
@@ -41,11 +47,11 @@ struct RemindersMCP: AsyncParsableCommand {
         let (granted, error) = Reminders.requestAccess()
 
         guard granted else {
-            log("Error: Reminders access denied")
+            criticalLog("Error: Reminders access denied")
             if let error {
-                log("Error: \(error.localizedDescription)")
+                criticalLog("Error: \(error.localizedDescription)")
             }
-            log("Grant access in System Preferences > Privacy & Security > Reminders")
+            criticalLog("Grant access in System Preferences > Privacy & Security > Reminders")
             throw ExitCode.failure
         }
 

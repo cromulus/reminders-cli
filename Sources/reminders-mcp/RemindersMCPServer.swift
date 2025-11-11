@@ -110,6 +110,48 @@ public struct SearchFilters: Encodable {
     }
 }
 
+struct ListsRequest: Decodable {
+    enum Action: String, Decodable {
+        case list
+        case create
+        case delete
+        case ensureArchive
+    }
+
+    let action: Action
+    let list: ListsListPayload?
+    let create: ListsCreatePayload?
+    let delete: ListsDeletePayload?
+    let ensureArchive: ListsEnsureArchivePayload?
+}
+
+struct ListsListPayload: Decodable {
+    let includeReadOnly: Bool?
+}
+
+struct ListsCreatePayload: Decodable {
+    let name: String
+    let source: String?
+}
+
+struct ListsDeletePayload: Decodable {
+    let identifier: String
+}
+
+struct ListsEnsureArchivePayload: Decodable {
+    let name: String?
+    let createIfMissing: Bool?
+    let source: String?
+}
+
+enum AnalyzeMode: String, Decodable {
+    case overview
+}
+
+struct AnalyzeRequest: Decodable {
+    let mode: AnalyzeMode?
+}
+
 public struct SearchResponse: Encodable {
     public let reminders: [EKReminder]
     public let totalCount: Int
@@ -117,9 +159,17 @@ public struct SearchResponse: Encodable {
     public let hasMore: Bool
     public let limit: Int?
     public let offset: Int?
-    public let filters: SearchFilters
+    public let filters: SearchFilters?
+    public let groups: [SearchGroup]?
 
-    public init(reminders: [EKReminder], totalCount: Int, limit: Int? = nil, offset: Int? = nil, filters: SearchFilters = SearchFilters()) {
+    public init(
+        reminders: [EKReminder],
+        totalCount: Int,
+        limit: Int? = nil,
+        offset: Int? = nil,
+        filters: SearchFilters? = nil,
+        groups: [SearchGroup]? = nil
+    ) {
         self.reminders = reminders
         self.totalCount = totalCount
         self.returnedCount = reminders.count
@@ -127,6 +177,7 @@ public struct SearchResponse: Encodable {
         self.limit = limit
         self.offset = offset
         self.filters = filters
+        self.groups = groups
     }
 }
 
@@ -149,13 +200,24 @@ public struct BulkResponse: Encodable {
     public let failedCount: Int
     public let errors: [String]
     public let changes: [ChangeRecord]
+    public let items: [BulkItemResult]
+    public let dryRun: Bool
     public let success: Bool
 
-    public init(processedCount: Int, failedCount: Int, errors: [String], changes: [ChangeRecord] = []) {
+    public init(
+        processedCount: Int,
+        failedCount: Int,
+        errors: [String],
+        changes: [ChangeRecord] = [],
+        items: [BulkItemResult] = [],
+        dryRun: Bool = false
+    ) {
         self.processedCount = processedCount
         self.failedCount = failedCount
         self.errors = errors
         self.changes = changes
+        self.items = items
+        self.dryRun = dryRun
         self.success = failedCount == 0
     }
 }
