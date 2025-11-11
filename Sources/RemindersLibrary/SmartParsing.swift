@@ -5,7 +5,7 @@ import EventKit
 
 extension Priority {
     /// Parse priority from various natural formats
-    /// Supports: !!!, !!, !, ^high, ^urgent, ^critical, ^3, ^medium, ^important, ^2, ^low, ^normal, ^1, ^none, ^0, ^, or empty string
+    /// Supports: high, urgent, critical, medium, important, low, normal, none, or numbers 0-3
     public init?(fromString string: String) {
         let trimmed = string.trimmingCharacters(in: .whitespaces).lowercased()
 
@@ -15,36 +15,19 @@ extension Priority {
             return
         }
 
-        // Symbol-based priorities
-        if trimmed == "!!!" {
-            self = .high
-            return
-        }
-        if trimmed == "!!" {
-            self = .medium
-            return
-        }
-        if trimmed == "!" {
-            self = .low
-            return
-        }
-
-        // Remove ^ prefix if present
-        let value = trimmed.hasPrefix("^") ? String(trimmed.dropFirst()) : trimmed
-
         // Word and number based priorities
-        switch value {
+        switch trimmed {
         case "high", "urgent", "critical", "3":
             self = .high
         case "medium", "important", "2":
             self = .medium
         case "low", "normal", "1":
             self = .low
-        case "none", "0", "":
+        case "none", "0":
             self = .none
         default:
             // Try the standard rawValue init as fallback
-            if let priority = Priority(rawValue: value) {
+            if let priority = Priority(rawValue: trimmed) {
                 self = priority
             } else {
                 return nil
@@ -77,12 +60,12 @@ public struct TitleParser {
     /// Parse a title and extract metadata markers
     ///
     /// Markers:
-    /// - `!!!`, `!!`, `!` or `^priority` → priority
+    /// - `!high`, `!3`, `!urgent`, `!medium`, `!2`, `!low`, `!1`, `!none`, `!0` → priority
     /// - `@listname` → list
     /// - `#tag` → tags
     /// - Natural language dates → due date
     ///
-    /// Example: "Buy milk tomorrow @Groceries ^high #shopping"
+    /// Example: "Buy milk tomorrow @Groceries !high #shopping"
     /// Returns: ReminderMetadata(cleanedTitle: "Buy milk", priority: .high, listName: "Groceries", tags: ["shopping"], dueDate: tomorrow)
     public static func parse(_ title: String) -> ReminderMetadata {
         var cleanedTitle = title
@@ -92,21 +75,13 @@ public struct TitleParser {
         var dueDate: DateComponents?
 
         // Regular expressions for metadata markers
-        // Priority symbols (!!!, !!, !) - match as separate tokens with optional surrounding whitespace
-        let prioritySymbolPattern = #"(^|\s)(!!!|!!|!)(\s|$)"#
-        if let match = cleanedTitle.range(of: prioritySymbolPattern, options: .regularExpression) {
+        // Priority with ! prefix: !high, !3, !urgent, !medium, !2, !low, !1, !none, !0
+        let priorityPattern = #"!(high|urgent|critical|medium|important|low|normal|none|\d+)"#
+        if let match = cleanedTitle.range(of: priorityPattern, options: [.regularExpression, .caseInsensitive]) {
             let matchedText = String(cleanedTitle[match])
-            // Extract just the symbols
-            let symbol = matchedText.trimmingCharacters(in: .whitespaces)
-            priority = Priority(fromString: symbol)
-            cleanedTitle.removeSubrange(match)
-        }
-
-        // Priority with ^ prefix: ^high, ^urgent, ^critical, ^3, etc.
-        let priorityCaretPattern = #"\^(high|urgent|critical|medium|important|low|normal|none|\d+)"#
-        if let match = cleanedTitle.range(of: priorityCaretPattern, options: [.regularExpression, .caseInsensitive]) {
-            let priorityString = String(cleanedTitle[match])
-            priority = Priority(fromString: priorityString)
+            // Extract the word/number part after !
+            let value = String(matchedText.dropFirst())
+            priority = Priority(fromString: value)
             cleanedTitle.removeSubrange(match)
         }
 
@@ -121,11 +96,17 @@ public struct TitleParser {
         }
 
         // List name: @listname (captures until whitespace, #, ^, or end)
+        // Note: A reminder can only be in ONE list, so we only extract the first @list marker
+        // and leave any additional ones in the title as a visual indicator of the issue
         let listPattern = #"@([^\s#^]+)"#
-        if let match = cleanedTitle.range(of: listPattern, options: .regularExpression) {
-            let matchedText = String(cleanedTitle[match])
+        let listMatches = cleanedTitle.ranges(of: listPattern, options: .regularExpression)
+
+        if let firstMatch = listMatches.first {
+            let matchedText = String(cleanedTitle[firstMatch])
             listName = String(matchedText.dropFirst()) // Remove @
-            cleanedTitle.removeSubrange(match)
+            cleanedTitle.removeSubrange(firstMatch)
+            // If there are additional @list markers, leave them in the title
+            // so the user can see there's an issue
         }
 
         // Clean up multiple spaces and trim before date detection

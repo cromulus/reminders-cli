@@ -1372,3 +1372,15 @@ ngrok http 3000
 - Webhook URLs should use HTTPS
 - No rate limiting - implement at reverse proxy level if needed
 - Private API fields may contain sensitive information (URLs, email references)
+
+## Model Context Protocol (MCP) Server
+
+The MCP server now exposes a consolidated five-tool surface optimized for LLM workflows:
+
+1. `reminders_manage` – single reminder create/read/update/delete/complete/uncomplete/move/archive  
+2. `reminders_bulk` – batch operations (update, complete, uncomplete, move, archive, delete) with optional dry runs  
+3. `reminders_search` – declarative query DSL with AND/OR/XOR/NOT logic, grouping, and multi-key sorting  
+4. `reminders_lists` – list enumeration/creation/deletion plus archive helpers  
+5. `reminders_analyze` – overview statistics and insight summaries
+
+Detailed schemas, prompt recipes, and priority/tag mappings are documented in [docs/mcp/consolidated-tools-reference.md](docs/mcp/consolidated-tools-reference.md). Implementation lives in `Sources/reminders-mcp/RemindersMCPServer.swift` and companion model files within `Sources/reminders-mcp/`.
