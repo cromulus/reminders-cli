@@ -1,6 +1,7 @@
 import ArgumentParser
 import Foundation
 import RemindersLibrary
+import RemindersMCPKit
 import SwiftMCP
 
 @main

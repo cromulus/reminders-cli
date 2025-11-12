@@ -2,9 +2,13 @@ import Darwin
 import Hummingbird
 import HummingbirdFoundation
 import RemindersLibrary
+import RemindersMCPKit
+import SwiftMCP
+import Logging
 import Foundation
 import EventKit
 import ArgumentParser
+import AsyncHTTPClient
 
 // MARK: - Configuration
 
@@ -35,11 +39,20 @@ struct Configuration: ParsableCommand {
     
     @Flag(name: [.customLong("generate-token")], help: "Generate a new API token and exit")
     var generateToken = false
+
+    @Flag(name: [.customLong("no-mcp")], help: "Disable the embedded MCP HTTP/SSE server")
+    var disableMCP = false
+
+    @Option(name: [.customLong("mcp-port")], help: "Port for the embedded MCP HTTP/SSE server (default: API port + 1)")
+    var mcpPort: Int?
+
+    @Option(name: [.customLong("mcp-host")], help: "Hostname for the embedded MCP HTTP/SSE server")
+    var mcpHost: String = "127.0.0.1"
     
     func run() throws {
         // Set up logging first
         if let logLevelString = logLevel ?? ProcessInfo.processInfo.environment["LOG_LEVEL"],
-           let level = LogLevel(string: logLevelString) {
+           let level = RemindersLibrary.LogLevel(string: logLevelString) {
             Logger.shared.setLevel(level)
             Logger.shared.info("Log level set to \(level.rawValue)")
         }
@@ -74,7 +87,16 @@ struct Configuration: ParsableCommand {
         case (true, _):
             Logger.shared.info("Reminders access granted. Starting API server...")
             print("Reminders access granted. Starting API server...")
-            startServer(hostname: hostname, port: port, token: apiToken, requireAuth: finalRequireAuth)
+            let resolvedMCPPort = mcpPort ?? (port + 1)
+            startServer(
+                hostname: hostname,
+                port: port,
+                token: apiToken,
+                requireAuth: finalRequireAuth,
+                enableMCP: !disableMCP,
+                mcpHost: mcpHost,
+                mcpPort: resolvedMCPPort
+            )
         case (false, let error):
             Logger.shared.error("Reminders access denied")
             print("Error: You need to grant reminders access to use the API server")
@@ -94,12 +116,21 @@ struct WebhookTestResponse: Codable {
 }
 
 // Initialize and start the server
-func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool) {
+func startServer(
+    hostname: String,
+    port: Int,
+    token: String?,
+    requireAuth: Bool,
+    enableMCP: Bool,
+    mcpHost: String,
+    mcpPort: Int
+) {
     Logger.shared.info("Initializing server components...")
     
     let remindersService = Reminders()
     let webhookManager = WebhookManager(remindersService: remindersService)
     let authManager = AuthManager(token: token, requireAuth: requireAuth)
+    var mcpHTTPClient: HTTPClient?
     
     Logger.shared.debug("Creating Hummingbird application...")
     
@@ -151,6 +182,20 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
     // Add auth check middleware
     app.middleware.add(AuthCheckMiddleware())
     Logger.shared.debug("Auth check middleware added")
+
+    var serverNameForProxy: String?
+    if enableMCP {
+        let httpClient = HTTPClient(eventLoopGroupProvider: .shared(app.eventLoopGroup))
+        mcpHTTPClient = httpClient
+        app.lifecycle.register(
+            label: "MCPProxyHTTPClient",
+            start: .sync {},
+            shutdown: .sync {
+                try httpClient.syncShutdown()
+            }
+        )
+        Logger.shared.debug("Initialized MCP proxy HTTP client")
+    }
 
     // MARK: - Authentication Settings Routes
     
@@ -817,7 +862,63 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
     print("  Set log level: reminders-api --log-level DEBUG")
     print("  Environment: REMINDERS_API_TOKEN=YOUR_TOKEN reminders-api")
     print("  Environment: LOG_LEVEL=DEBUG reminders-api")
+    if enableMCP {
+        print("Embedded MCP SSE: http://\(mcpHost):\(mcpPort)/mcp")
+        print("REST proxy endpoint: http://\(hostname):\(port)/mcp")
+    } else {
+        print("Embedded MCP SSE: disabled")
+    }
     print("=====================================")
+    
+    var embeddedMCPTransport: HTTPSSETransport?
+    if enableMCP {
+        Logger.shared.info("Starting embedded MCP server...")
+        let mcpServer = RemindersMCPServer(verbose: Logger.shared.level <= .debug)
+        serverNameForProxy = "/\(mcpServer.serverName)"
+        let transport = HTTPSSETransport(server: mcpServer, host: mcpHost, port: mcpPort)
+        #if canImport(Logging)
+        transport.logger.logLevel = Logger.Level.info
+        #endif
+
+        if requireAuth || (token != nil) {
+            transport.authorizationHandler = { provided in
+                guard let provided else {
+                    return .unauthorized("Authentication required")
+                }
+
+                if let directToken = token, !directToken.isEmpty {
+                    return provided == directToken ? .authorized : .unauthorized("Invalid token")
+                }
+
+                return authManager.isValidToken(provided) ? .authorized : .unauthorized("Invalid token")
+            }
+        } else {
+            transport.authorizationHandler = { _ in .authorized }
+        }
+
+        embeddedMCPTransport = transport
+
+        Task.detached {
+            do {
+                try await transport.run()
+            } catch {
+                Logger.shared.error("Embedded MCP transport error: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    if enableMCP, let httpClient = mcpHTTPClient {
+        let baseURL = "http://\(mcpHost):\(mcpPort)"
+        let proxy = MCPProxy(
+            baseURL: baseURL,
+            hostHeader: "\(mcpHost):\(mcpPort)",
+            serverPath: serverNameForProxy,
+            httpClient: httpClient,
+            logger: app.logger
+        )
+        app.middleware.add(MCPProxyMiddleware(proxy: proxy))
+        Logger.shared.info("MCP proxy middleware registered for /mcp")
+    }
     
     Logger.shared.info("Starting Hummingbird server...")
     
@@ -826,6 +927,25 @@ func startServer(hostname: String, port: Int, token: String?, requireAuth: Bool)
     
     // Wait for the application to close
     app.wait()
+
+    if let transport = embeddedMCPTransport {
+        Task.detached {
+            try? await transport.stop()
+        }
+    }
+}
+
+private func mapLogLevelToSwiftLogger(_ level: RemindersLibrary.LogLevel) -> Logging.Logger.Level {
+    switch level {
+    case .debug:
+        return .debug
+    case .info:
+        return .info
+    case .warn:
+        return .warning
+    case .error:
+        return .error
+    }
 }
 
 // Helper function to fetch reminders from a specific list
