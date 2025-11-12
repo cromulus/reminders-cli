@@ -74,126 +74,96 @@ final class FilterExpressionTests: XCTestCase {
     // MARK: - Quote Stripping Tests
 
     func testQuoteStrippingInEquality() throws {
-        // Test that single quotes are stripped
-        let parts = try FilterExpression.parseConditionPublic("priority = 'high'")
-        XCTAssertEqual(parts.value, "high")
+        let condition = try FilterExpression.parseConditionPublic("priority = 'high'")
+        XCTAssertEqual(condition.value, "high")
 
-        // Test that double quotes are stripped
-        let parts2 = try FilterExpression.parseConditionPublic("priority = \"high\"")
-        XCTAssertEqual(parts2.value, "high")
+        let doubleQuote = try FilterExpression.parseConditionPublic("priority = \"high\"")
+        XCTAssertEqual(doubleQuote.value, "high")
 
-        // Test without quotes
-        let parts3 = try FilterExpression.parseConditionPublic("priority = high")
-        XCTAssertEqual(parts3.value, "high")
+        let noQuote = try FilterExpression.parseConditionPublic("priority = high")
+        XCTAssertEqual(noQuote.value, "high")
     }
 
     func testParenthesisStrippingInINOperator() throws {
-        // Test parentheses syntax
-        let parts = try FilterExpression.parseConditionPublic("list IN ('Work', 'Home')")
-        XCTAssertEqual(parts.value, "Work, Home")
+        let condition = try FilterExpression.parseConditionPublic("list IN ('Work', 'Home')")
+        XCTAssertEqual(condition.value, "Work, Home")
 
-        // Test bracket syntax
-        let parts2 = try FilterExpression.parseConditionPublic("list IN [Work, Home]")
-        XCTAssertEqual(parts2.value, "Work, Home")
+        let brackets = try FilterExpression.parseConditionPublic("list IN [Work, Home]")
+        XCTAssertEqual(brackets.value, "Work, Home")
 
-        // Test without delimiters
-        let parts3 = try FilterExpression.parseConditionPublic("list IN Work, Home")
-        XCTAssertEqual(parts3.value, "Work, Home")
+        let bare = try FilterExpression.parseConditionPublic("list IN Work, Home")
+        XCTAssertEqual(bare.value, "Work, Home")
     }
 
     // MARK: - Operator Parsing Tests
 
     func testParseEqualsOperator() throws {
-        let filter = try FilterExpression.parse("priority = 'high'")
-        XCTAssertEqual(filter.conditions.count, 1)
-        XCTAssertEqual(filter.conditions[0].field, "priority")
-        XCTAssertEqual(filter.conditions[0].op, .equals)
-        XCTAssertEqual(filter.conditions[0].value, "high")
+        let condition = try FilterExpression.parseConditionPublic("priority = 'high'")
+        XCTAssertEqual(condition.field, "priority")
+        XCTAssertEqual(condition.op, .equals)
+        XCTAssertEqual(condition.value, "high")
     }
 
     func testParseNotEqualsOperator() throws {
-        let filter = try FilterExpression.parse("priority != 'low'")
-        XCTAssertEqual(filter.conditions.count, 1)
-        XCTAssertEqual(filter.conditions[0].op, .notEquals)
+        let condition = try FilterExpression.parseConditionPublic("priority != 'low'")
+        XCTAssertEqual(condition.op, .notEquals)
     }
 
     func testParseContainsOperator() throws {
-        let filter = try FilterExpression.parse("title CONTAINS 'meeting'")
-        XCTAssertEqual(filter.conditions.count, 1)
-        XCTAssertEqual(filter.conditions[0].op, .contains)
-        XCTAssertEqual(filter.conditions[0].value, "meeting")
+        let condition = try FilterExpression.parseConditionPublic("title CONTAINS 'meeting'")
+        XCTAssertEqual(condition.op, .contains)
+        XCTAssertEqual(condition.value, "meeting")
     }
 
     func testParseNotContainsOperator() throws {
-        let filter = try FilterExpression.parse("notes NOT CONTAINS 'urgent'")
-        XCTAssertEqual(filter.conditions.count, 1)
-        XCTAssertEqual(filter.conditions[0].op, .notContains)
+        let condition = try FilterExpression.parseConditionPublic("notes NOT CONTAINS 'urgent'")
+        XCTAssertEqual(condition.op, .notContains)
     }
 
     func testParseLikeOperator() throws {
-        let filter = try FilterExpression.parse("title LIKE 'Buy *'")
-        XCTAssertEqual(filter.conditions.count, 1)
-        XCTAssertEqual(filter.conditions[0].op, .like)
+        let condition = try FilterExpression.parseConditionPublic("title LIKE 'Buy *'")
+        XCTAssertEqual(condition.op, .like)
     }
 
     func testParseMatchesOperator() throws {
-        let filter = try FilterExpression.parse("title MATCHES '^Buy.*'")
-        XCTAssertEqual(filter.conditions.count, 1)
-        XCTAssertEqual(filter.conditions[0].op, .matches)
+        let condition = try FilterExpression.parseConditionPublic("title MATCHES '^Buy.*'")
+        XCTAssertEqual(condition.op, .matches)
     }
 
     func testParseINOperator() throws {
-        let filter = try FilterExpression.parse("list IN ('Work', 'Home')")
-        XCTAssertEqual(filter.conditions.count, 1)
-        XCTAssertEqual(filter.conditions[0].op, .in)
+        let condition = try FilterExpression.parseConditionPublic("list IN ('Work', 'Home')")
+        XCTAssertEqual(condition.op, .in)
     }
 
     func testParseNotINOperator() throws {
-        let filter = try FilterExpression.parse("priority NOT IN ('low', 'none')")
-        XCTAssertEqual(filter.conditions.count, 1)
-        XCTAssertEqual(filter.conditions[0].op, .notIn)
-    }
-
-    // MARK: - Logical Operator Tests
-
-    func testParseANDOperator() throws {
-        let filter = try FilterExpression.parse("priority = 'high' AND completed = false")
-        XCTAssertEqual(filter.conditions.count, 2)
-        XCTAssertEqual(filter.logicalOps.count, 1)
-        XCTAssertEqual(filter.logicalOps[0], .and)
-    }
-
-    func testParseOROperator() throws {
-        let filter = try FilterExpression.parse("list = 'Work' OR list = 'Personal'")
-        XCTAssertEqual(filter.conditions.count, 2)
-        XCTAssertEqual(filter.logicalOps.count, 1)
-        XCTAssertEqual(filter.logicalOps[0], .or)
+        let condition = try FilterExpression.parseConditionPublic("priority NOT IN ('low', 'none')")
+        XCTAssertEqual(condition.op, .notIn)
     }
 
     func testParseComplexLogicalExpression() throws {
-        let filter = try FilterExpression.parse("priority = 'high' AND list = 'Work' OR completed = true")
-        XCTAssertEqual(filter.conditions.count, 3)
-        XCTAssertEqual(filter.logicalOps.count, 2)
-        XCTAssertEqual(filter.logicalOps[0], .and)
-        XCTAssertEqual(filter.logicalOps[1], .or)
+        let workHigh = createReminder(title: "Work item", priority: 1, isCompleted: false)
+        let completedOther = createReminder(title: "Done", priority: 5, isCompleted: true)
+        let filter = try FilterExpression.parse("priority = 'high' AND list = '\(testCalendar.title)' OR completed = true")
+
+        XCTAssertTrue(filter.evaluate(workHigh, calendar: Calendar.current))
+        XCTAssertTrue(filter.evaluate(completedOther, calendar: Calendar.current))
     }
 
     // MARK: - Shortcut Expansion Tests
 
     func testOverdueShortcut() throws {
         let filter = try FilterExpression.parse("overdue")
-        // Should expand to multiple conditions
-        XCTAssertGreaterThan(filter.conditions.count, 0)
+        XCTAssertFalse(filter.isEmpty)
     }
 
     func testDueTodayShortcut() throws {
         let filter = try FilterExpression.parse("due_today")
-        XCTAssertGreaterThan(filter.conditions.count, 0)
+        XCTAssertFalse(filter.isEmpty)
     }
 
     func testHighPriorityShortcut() throws {
         let filter = try FilterExpression.parse("high_priority")
-        XCTAssertGreaterThan(filter.conditions.count, 0)
+        XCTAssertFalse(filter.isEmpty)
     }
 
     // MARK: - Evaluation Tests
@@ -408,7 +378,7 @@ final class FilterExpressionTests: XCTestCase {
 
     func testEmptyFilterReturnsTrue() {
         let reminder = createReminder(title: "Test")
-        let filter = FilterExpression(conditions: [], logicalOps: [])
+        let filter = FilterExpression.empty
 
         XCTAssertTrue(filter.evaluate(reminder, calendar: .current))
     }
@@ -428,8 +398,8 @@ final class FilterExpressionTests: XCTestCase {
     }
 
     func testMultipleSpacesBetweenTokens() {
-        let filter = try! FilterExpression.parse("priority   =    'high'")
-        XCTAssertEqual(filter.conditions.count, 1)
+        let condition = try! FilterExpression.parseConditionPublic("priority   =    'high'")
+        XCTAssertEqual(condition.value, "high")
     }
 
     // MARK: - Error Cases
@@ -444,13 +414,5 @@ final class FilterExpressionTests: XCTestCase {
         XCTAssertThrowsError(try FilterExpression.parse("priority")) { error in
             XCTAssertTrue(error is RemindersMCPError)
         }
-    }
-}
-
-// Extension to expose private methods for testing
-extension FilterExpression {
-    static func parseConditionPublic(_ conditionStr: String) throws -> (field: String, op: FilterOperator, value: String, negate: Bool) {
-        let condition = try parseCondition(conditionStr)
-        return (condition.field, condition.op, condition.value, condition.negate)
     }
 }

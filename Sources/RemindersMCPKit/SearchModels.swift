@@ -1,6 +1,7 @@
 import Foundation
+import SwiftMCP
 
-public enum SearchField: String, Decodable {
+public enum SearchField: String, Decodable, Sendable {
     case title
     case notes
     case list
@@ -15,7 +16,7 @@ public enum SearchField: String, Decodable {
     case hasNotes
 }
 
-public enum SearchOperator: String, Decodable {
+public enum SearchOperator: String, Decodable, Sendable {
     case equals
     case notEquals
     case contains
@@ -38,7 +39,7 @@ public enum SearchOperator: String, Decodable {
     case notMatches
 }
 
-public enum SearchValue: Decodable {
+public enum SearchValue: Decodable, Sendable {
     case string(String)
     case bool(Bool)
     case number(Double)
@@ -94,13 +95,16 @@ extension SearchValue {
     }
 }
 
-public struct SearchClause: Decodable {
+/// Atomic condition within a logic node.
+@Schema
+public struct SearchClause: Decodable, Sendable {
     public let field: SearchField
     public let op: SearchOperator
     public let value: SearchValue?
 }
 
-public final class LogicNode: Decodable {
+/// Recursive structure that expresses AND/OR/NOT logic for searches.
+public final class LogicNode: Decodable, @unchecked Sendable {
     public let clause: SearchClause?
     public let all: [LogicNode]?
     public let any: [LogicNode]?
@@ -127,25 +131,27 @@ public final class LogicNode: Decodable {
     }
 }
 
-public enum SearchGroupField: String, Decodable {
+public enum SearchGroupField: String, Decodable, Sendable {
     case priority
     case list
     case tag
     case dueDate
 }
 
-public enum SearchDateGranularity: String, Decodable {
+public enum SearchDateGranularity: String, Decodable, Sendable {
     case day
     case week
     case month
 }
 
-public struct SearchGrouping: Decodable {
+/// Grouping descriptor used to aggregate search results.
+@Schema
+public struct SearchGrouping: Decodable, Sendable {
     public let field: SearchGroupField
     public let granularity: SearchDateGranularity?
 }
 
-public enum SearchSortField: String, Decodable {
+public enum SearchSortField: String, Decodable, Sendable {
     case priority
     case list
     case tag
@@ -155,29 +161,104 @@ public enum SearchSortField: String, Decodable {
     case updatedAt
 }
 
-public enum SortDirection: String, Decodable {
+public enum SortDirection: String, Decodable, Sendable {
     case asc
     case desc
 }
 
-public struct SearchSortDescriptor: Decodable {
+/// Sort descriptor applied to search results.
+@Schema
+public struct SearchSortDescriptor: Decodable, Sendable {
     public let field: SearchSortField
     public let direction: SortDirection
 }
 
-public struct SearchPagination: Decodable {
+/// Pagination block for search results.
+@Schema
+public struct SearchPagination: Decodable, Sendable {
     public let limit: Int?
     public let offset: Int?
 }
 
-public struct SearchRequest: Decodable {
+/// Rich search payload for reminders.
+@Schema
+public struct SearchRequest: Decodable, Sendable {
+    /// Structured logic tree. Use `all` (AND), `any` (OR), `not`.
     public let logic: LogicNode?
+    /// Optional grouping descriptors for aggregation.
     public let groupBy: [SearchGrouping]?
+    /// Sort descriptors evaluated in order.
     public let sort: [SearchSortDescriptor]?
+    /// Pagination information (limit/offset).
     public let pagination: SearchPagination?
+    /// Include completed reminders (default: false).
     public let includeCompleted: Bool?
+    /// Restrict to specific lists (names or identifiers).
     public let lists: [String]?
+    /// Lightweight fuzzy query applied to title/notes.
     public let query: String?
+
+    public init(logic: LogicNode? = nil,
+                groupBy: [SearchGrouping]? = nil,
+                sort: [SearchSortDescriptor]? = nil,
+                pagination: SearchPagination? = nil,
+                includeCompleted: Bool? = nil,
+                lists: [String]? = nil,
+                query: String? = nil) {
+        self.logic = logic
+        self.groupBy = groupBy
+        self.sort = sort
+        self.pagination = pagination
+        self.includeCompleted = includeCompleted
+        self.lists = lists
+        self.query = query
+    }
+
+    private init(dto: SearchRequestDTO) {
+        self.init(
+            logic: dto.logic,
+            groupBy: dto.groupBy,
+            sort: dto.sort,
+            pagination: dto.pagination,
+            includeCompleted: dto.includeCompleted,
+            lists: dto.lists,
+            query: dto.query
+        )
+    }
+
+    public init(from decoder: Decoder) throws {
+        if let dto = try? SearchRequestDTO(from: decoder) {
+            self.init(dto: dto)
+            return
+        }
+
+        if let stringValue = try? decoder.singleValueContainer().decode(String.self) {
+            let data = Data(stringValue.utf8)
+            let dto = try JSONDecoder().decode(SearchRequestDTO.self, from: data)
+            self.init(dto: dto)
+            return
+        }
+
+        if let container = try? decoder.container(keyedBy: DynamicCodingKey.self),
+           let requestKey = container.allKeys.first(where: { $0.stringValue == "request" }) {
+            let nested = try container.superDecoder(forKey: requestKey)
+            let dto = try SearchRequestDTO(from: nested)
+            self.init(dto: dto)
+            return
+        }
+
+        throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Unable to decode SearchRequest"))
+    }
+}
+
+private struct SearchRequestDTO: Decodable {
+    let logic: LogicNode?
+    let groupBy: [SearchGrouping]?
+    let sort: [SearchSortDescriptor]?
+    let pagination: SearchPagination?
+    let includeCompleted: Bool?
+    let lists: [String]?
+    let query: String?
 }
 
 public struct SearchGroup: Encodable {

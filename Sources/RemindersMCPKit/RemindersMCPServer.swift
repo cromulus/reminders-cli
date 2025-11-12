@@ -217,6 +217,20 @@ public class RemindersMCPServer {
     // MARK: - Consolidated MCP Tools
 
     /// Unified single-reminder CRUD/complete/archive tool.
+    ///
+    /// ### Supported `action` values
+    /// - `create`: Provide `create { title, list?, notes?, dueDate? }`
+    /// - `read`: Provide `read { uuid }`
+    /// - `update`: Provide `update { uuid, title?, notes?, dueDate?, priority?, tags? }`
+    /// - `delete`: Provide `delete { uuid }`
+    /// - `complete` / `uncomplete`: Provide `{ uuid }`
+    /// - `move`: Provide `move { uuid, targetList }`
+    /// - `archive`: Provide `archive { uuid, archiveList?, createIfMissing?, source? }`
+    ///
+    /// ### Usage Tips
+    /// - Use `lists_list` to discover valid list identifiers before move/archive.
+    /// - `dueDate` accepts ISO8601 or natural language strings (`"tomorrow 5pm"`).
+    /// - `priority` accepts `high|medium|low|none` or numeric `0-9`.
     @MCPTool
     public func reminders_manage(_ request: ManageRequest) async throws -> ManageResponse {
         switch request.action {
@@ -264,6 +278,23 @@ public class RemindersMCPServer {
     }
 
     /// Batch reminder operations with optional dry-run reporting.
+    ///
+    /// ### Supported `action` values
+    /// - `complete`, `uncomplete`
+    /// - `delete`
+    /// - `move` (requires `fields.targetList`)
+    /// - `archive` (requires `fields.archiveList?`, `fields.createIfMissing?`)
+    ///
+    /// ### Example
+    /// ```json
+    /// {
+    ///   "action": "complete",
+    ///   "uuids": ["UUID-1", "UUID-2"],
+    ///   "dryRun": true
+    /// }
+    /// ```
+    ///
+    /// Dry-runs report what *would* change without mutating reminders.
     @MCPTool
     public func reminders_bulk(_ request: BulkRequest) async throws -> BulkResponse {
         guard !request.uuids.isEmpty else {
@@ -307,7 +338,35 @@ public class RemindersMCPServer {
         )
     }
 
-    /// Advanced search with logic trees, grouping, and pagination.
+    /// Advanced reminder search with logic trees, natural language dates, grouping, and pagination.
+    ///
+    /// ### Logic tree helpers
+    /// - Use `logic.all` for AND, `logic.any` for OR, `logic.not` to invert.
+    /// - Leaf nodes use `{ "clause": { "field": "priority", "op": "in", "value": ["high","medium"] } }`.
+    /// - Supported fields: `title`, `notes`, `list`, `priority`, `tag`, `dueDate`, `createdAt`, `updatedAt`, `completed`, `hasDueDate`, `hasNotes`.
+    /// - Date literals accept ISO8601 or natural phrases (`"today"`, `"next week"`, `"friday+2"`).
+    ///
+    /// ### Example payload
+    /// ```json
+    /// {
+    ///   "logic": {
+    ///     "all": [
+    ///       { "clause": { "field": "priority", "op": "in", "value": ["high","medium"] } },
+    ///       { "clause": { "field": "list", "op": "equals", "value": "Work" } },
+    ///       { "clause": { "field": "dueDate", "op": "lessOrEqual", "value": "end of week" } }
+    ///     ]
+    ///   },
+    ///   "sort": [{ "field": "dueDate", "direction": "asc" }],
+    ///   "pagination": { "limit": 25 }
+    /// }
+    /// ```
+    ///
+    /// ### Request tips
+    /// - `logic`: structured filtering (preferred over ad-hoc parsing).
+    /// - `query`: lightweight fuzzy search across title + notes.
+    /// - `sort`: array of `{ "field": "dueDate", "direction": "asc" }`.
+    /// - `pagination`: `{ "limit": 25, "offset": 50 }`.
+    /// - `groupBy`: group counts by list/priority/tag with optional `granularity` for dates.
     @MCPTool
     public func reminders_search(_ request: SearchRequest) async throws -> SearchResponse {
         let includeCompleted = request.includeCompleted ?? false
@@ -367,7 +426,15 @@ public class RemindersMCPServer {
         )
     }
 
-    /// List creation/deletion plus archive helpers.
+    /// List discovery, creation, deletion, and archive helpers.
+    ///
+    /// ### Supported actions
+    /// - `list`: `{ "includeReadOnly": false }` lists available reminder lists.
+    /// - `create`: `{ "name": "Projects", "source": "iCloud" }`.
+    /// - `delete`: `{ "identifier": "<list name or UUID>" }`.
+    /// - `ensureArchive`: `{ "name": "Archive", "createIfMissing": true }`.
+    ///
+    /// Use `list` results to drive other tools (eg. `move`, `archive`) so you always pass valid identifiers.
     @MCPTool
     public func reminders_lists(_ request: ListsRequest) async throws -> ListsResponse {
         switch request.action {
@@ -397,6 +464,13 @@ public class RemindersMCPServer {
     }
 
     /// Aggregate reminder analytics (overview mode).
+    ///
+    /// Returns counts for:
+    /// - completed vs incomplete
+    /// - overdue, due today, due this week
+    /// - per-priority and per-list distribution
+    ///
+    /// Future modes can expand the `AnalyzeRequest` enum; for now send `{ "mode": "overview" }` or omit the body.
     @MCPTool
     public func reminders_analyze(_ request: AnalyzeRequest? = nil) async throws -> AnalyzeResponse {
         let mode = request?.mode ?? .overview
