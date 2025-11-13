@@ -1,22 +1,31 @@
 # Reminders MCP – Consolidated Tool Reference
 
-This reference outlines the new five-tool surface exposed by `RemindersMCPServer`. Each section includes a short description, JSON schema outline, and example prompt snippets an LLM can use.
+This reference outlines the new five-tool surface exposed by `RemindersMCPServer`. Each section includes a short description, JSON schema outline, and example prompt snippets an LLM can use. For end-to-end examples (request/response payloads, transport setup, troubleshooting), see [`docs/mcp/USAGE.md`](USAGE.md).
 
 ## 1. reminders_manage
 
-**Purpose:** Single-reminder operations (create/read/update/delete/complete/uncomplete/move/archive) with smart parsing for titles, priorities, and natural-language dates.
+**Purpose:** Single-reminder operations (create/read/update/delete/complete/uncomplete/move/archive) with smart parsing for titles, priorities, natural-language dates, and recurrence instructions (`recurrence { ... }` or `~weekly` shorthand).
 
 ```json
 {
   "action": "create|read|update|delete|complete|uncomplete|move|archive",
-  "create": { "list": "Work", "title": "Send report tomorrow @Finance ^high", "notes": "Quarterly numbers" },
+  "create": {
+    "list": "Work",
+    "title": "Send report tomorrow @Finance ^high ~weekly",
+    "notes": "Quarterly numbers",
+    "recurrence": {
+      "frequency": "weekly",
+      "daysOfWeek": ["monday"],
+      "end": { "type": "count", "value": "6" }
+    }
+  },
   "update": { "uuid": "...", "priority": "medium", "dueDate": "next Friday 9am" },
   "move": { "uuid": "...", "targetList": "Personal" },
   "archive": { "uuid": "...", "archiveList": "Archive", "createIfMissing": true }
 }
 ```
 
-**Prompt recipe:** “Create a high-priority reminder called ‘Send report tomorrow @Finance’ and archive any reminder titled ‘Weekly Sync’.”
+**Prompt recipe:** “Create a high-priority reminder called ‘Send report tomorrow @Finance ~weekly’ and archive any reminder titled ‘Weekly Sync’.”
 
 ## 2. reminders_bulk
 
@@ -115,4 +124,3 @@ This reference outlines the new five-tool surface exposed by `RemindersMCPServer
 - Multi-key sort descriptors accepted. Fields: `priority`, `list`, `tag`, `title`, `dueDate`, `createdAt`, `updatedAt`.
 
 Use this reference with the specification and implementation plan to build prompts, tests, or client integrations around the consolidated Reminders MCP tools.
-

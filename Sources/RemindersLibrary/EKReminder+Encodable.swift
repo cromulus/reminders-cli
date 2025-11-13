@@ -82,6 +82,20 @@ private struct FormattedDate: Encodable {
     }
 }
 
+private struct EncodedRecurrenceEnd: Encodable {
+    let type: String
+    let value: String?
+}
+
+private struct EncodedRecurrence: Encodable {
+    let frequency: String
+    let interval: Int
+    let daysOfWeek: [String]?
+    let dayOfMonth: Int?
+    let end: EncodedRecurrenceEnd
+    let summary: String
+}
+
 extension EKCalendar: @retroactive Encodable {
     private enum CalendarEncodingKeys: String, CodingKey {
         case title
@@ -127,6 +141,7 @@ extension EKReminder: @retroactive Encodable {
         case mailUrl
         case parentId
         case isSubtask
+        case recurrence
     }
 
     /// Convert EKReminderPriority to human-readable string
@@ -199,6 +214,11 @@ extension EKReminder: @retroactive Encodable {
             try container.encodeIfPresent(FormattedDate(from: dueDateComponents.date), forKey: .dueDate)
         }
 
+        if let rule = self.recurrenceRules?.first,
+           let recurrence = buildRecurrenceDescription(from: rule) {
+            try container.encode(recurrence, forKey: .recurrence)
+        }
+
         if let lastModifiedDate = self.lastModifiedDate {
             try container.encodeIfPresent(FormattedDate(from: lastModifiedDate), forKey: .lastModified)
         }
@@ -206,5 +226,116 @@ extension EKReminder: @retroactive Encodable {
         if let creationDate = self.creationDate {
             try container.encodeIfPresent(FormattedDate(from: creationDate), forKey: .creationDate)
         }
+    }
+
+    private func buildRecurrenceDescription(from rule: EKRecurrenceRule) -> EncodedRecurrence? {
+        let interval = max(rule.interval, 1)
+        let frequencyString = recurrenceFrequencyString(rule.frequency)
+        let days = rule.daysOfTheWeek?.compactMap { weekdayString(for: $0.dayOfTheWeek.rawValue) }
+        let dayOfMonth = rule.daysOfTheMonth?.first?.intValue
+        let encodedEnd = encodeRecurrenceEnd(rule.recurrenceEnd)
+        let summary = summarizeRecurrence(
+            frequency: rule.frequency,
+            interval: interval,
+            daysOfWeek: days,
+            dayOfMonth: dayOfMonth,
+            rawEnd: rule.recurrenceEnd
+        )
+
+        return EncodedRecurrence(
+            frequency: frequencyString,
+            interval: interval,
+            daysOfWeek: days,
+            dayOfMonth: dayOfMonth,
+            end: encodedEnd,
+            summary: summary
+        )
+    }
+
+    private func recurrenceFrequencyString(_ frequency: EKRecurrenceFrequency) -> String {
+        switch frequency {
+        case .daily: return "daily"
+        case .weekly: return "weekly"
+        case .monthly: return "monthly"
+        case .yearly: return "yearly"
+        @unknown default: return "custom"
+        }
+    }
+
+    private func weekdayString(for rawValue: Int) -> String? {
+        guard let weekday = EKWeekday(rawValue: rawValue) else { return nil }
+        switch weekday {
+        case .sunday: return "sunday"
+        case .monday: return "monday"
+        case .tuesday: return "tuesday"
+        case .wednesday: return "wednesday"
+        case .thursday: return "thursday"
+        case .friday: return "friday"
+        case .saturday: return "saturday"
+        @unknown default: return nil
+        }
+    }
+
+    private func encodeRecurrenceEnd(_ end: EKRecurrenceEnd?) -> EncodedRecurrenceEnd {
+        guard let end = end else {
+            return EncodedRecurrenceEnd(type: "never", value: nil)
+        }
+
+        if end.occurrenceCount > 0 {
+            return EncodedRecurrenceEnd(type: "count", value: String(end.occurrenceCount))
+        }
+
+        if let date = end.endDate {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return EncodedRecurrenceEnd(type: "date", value: formatter.string(from: date))
+        }
+
+        return EncodedRecurrenceEnd(type: "never", value: nil)
+    }
+
+    private func summarizeRecurrence(
+        frequency: EKRecurrenceFrequency,
+        interval: Int,
+        daysOfWeek: [String]?,
+        dayOfMonth: Int?,
+        rawEnd: EKRecurrenceEnd?
+    ) -> String {
+        var parts: [String] = []
+        let everyPrefix = interval == 1 ? "Every" : "Every \(interval)"
+
+        switch frequency {
+        case .daily:
+            parts.append("\(everyPrefix) day" + (interval == 1 ? "" : "s"))
+        case .weekly:
+            parts.append("\(everyPrefix) week" + (interval == 1 ? "" : "s"))
+            if let days = daysOfWeek, !days.isEmpty {
+                let prettyDays = days.map { $0.prefix(1).uppercased() + $0.dropFirst() }
+                parts.append("on " + prettyDays.joined(separator: ", "))
+            }
+        case .monthly:
+            parts.append("\(everyPrefix) month" + (interval == 1 ? "" : "s"))
+            if let day = dayOfMonth {
+                parts.append("on day \(day)")
+            }
+        case .yearly:
+            parts.append("\(everyPrefix) year" + (interval == 1 ? "" : "s"))
+        @unknown default:
+            parts.append("Custom cadence")
+        }
+
+        if let end = rawEnd {
+            if end.occurrenceCount > 0 {
+                let count = end.occurrenceCount
+                parts.append("for \(count) occurrence\(count == 1 ? "" : "s")")
+            } else if let endDate = end.endDate {
+                let formatter = DateFormatter()
+                formatter.dateStyle = .medium
+                formatter.timeStyle = .none
+                parts.append("until \(formatter.string(from: endDate))")
+            }
+        }
+
+        return parts.joined(separator: ", ")
     }
 }

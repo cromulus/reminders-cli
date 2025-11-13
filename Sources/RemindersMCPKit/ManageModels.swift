@@ -2,6 +2,95 @@ import Foundation
 import EventKit
 import SwiftMCP
 
+public enum RecurrenceFrequency: String, Decodable, Sendable {
+    case daily
+    case weekly
+    case monthly
+    case yearly
+}
+
+public enum RecurrenceEndType: String, Decodable, Sendable {
+    case never
+    case count
+    case date
+}
+
+@Schema
+public struct RecurrenceEndPayload: Decodable, Sendable {
+    public let type: RecurrenceEndType?
+    public let value: String?
+
+    public init(type: RecurrenceEndType? = nil, value: String? = nil) {
+        self.type = type
+        self.value = value
+    }
+}
+
+@Schema
+public struct RecurrencePayload: Decodable, Sendable {
+    public let frequency: RecurrenceFrequency?
+    public let interval: Int?
+    public let daysOfWeek: [String]?
+    public let dayOfMonth: Int?
+    public let end: RecurrenceEndPayload?
+    public let pattern: String?
+    public let remove: Bool?
+
+    public init(
+        frequency: RecurrenceFrequency? = nil,
+        interval: Int? = nil,
+        daysOfWeek: [String]? = nil,
+        dayOfMonth: Int? = nil,
+        end: RecurrenceEndPayload? = nil,
+        pattern: String? = nil,
+        remove: Bool? = nil
+    ) {
+        self.frequency = frequency
+        self.interval = interval
+        self.daysOfWeek = daysOfWeek
+        self.dayOfMonth = dayOfMonth
+        self.end = end
+        self.pattern = pattern
+        self.remove = remove
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case frequency
+        case interval
+        case daysOfWeek
+        case dayOfMonth
+        case end
+        case pattern
+        case remove
+    }
+
+    public init(from decoder: Decoder) throws {
+        if let container = try? decoder.container(keyedBy: CodingKeys.self) {
+            let frequency = try container.decodeIfPresent(RecurrenceFrequency.self, forKey: .frequency)
+            let interval = try container.decodeIfPresent(Int.self, forKey: .interval)
+            let daysOfWeek = try container.decodeIfPresent([String].self, forKey: .daysOfWeek)
+            let dayOfMonth = try container.decodeIfPresent(Int.self, forKey: .dayOfMonth)
+            let end = try container.decodeIfPresent(RecurrenceEndPayload.self, forKey: .end)
+            let pattern = try container.decodeIfPresent(String.self, forKey: .pattern)
+            let remove = try container.decodeIfPresent(Bool.self, forKey: .remove)
+            self.init(
+                frequency: frequency,
+                interval: interval,
+                daysOfWeek: daysOfWeek,
+                dayOfMonth: dayOfMonth,
+                end: end,
+                pattern: pattern,
+                remove: remove
+            )
+            return
+        }
+
+        let singleValue = try decoder.singleValueContainer()
+        let patternString = try singleValue.decode(String.self)
+        self.init(pattern: patternString)
+    }
+}
+
 public enum ManageAction: String, Decodable, Sendable {
     case create
     case read
@@ -107,6 +196,8 @@ public struct ManageCreatePayload: Decodable, Sendable {
     public let dueDate: String?
     /// Priority bucket (`high|medium|low|none` or numeric `0-9`).
     public let priority: String?
+    /// Recurrence descriptor (object or shorthand string). Use `{ "frequency": "weekly", "interval": 1 }` or `"weekly"`.
+    public let recurrence: RecurrencePayload?
 }
 
 /// Wrapper for simple UUID-only requests.
@@ -125,6 +216,8 @@ public struct ManageUpdatePayload: Decodable, Sendable {
     public let dueDate: String?
     public let priority: String?
     public let isCompleted: Bool?
+    /// Recurrence descriptor. Set `{ "remove": true }` to clear recurrence.
+    public let recurrence: RecurrencePayload?
 }
 
 /// Move an existing reminder to a different list.

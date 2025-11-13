@@ -21,11 +21,18 @@ public struct ParsedMetadata: Encodable {
     public let tags: [ParsedField]?
     public let dueDate: ParsedField?
 
-    public init(list: ParsedField? = nil, priority: ParsedField? = nil, tags: [ParsedField]? = nil, dueDate: ParsedField? = nil) {
+    public let recurrence: ParsedField?
+
+    public init(list: ParsedField? = nil,
+                priority: ParsedField? = nil,
+                tags: [ParsedField]? = nil,
+                dueDate: ParsedField? = nil,
+                recurrence: ParsedField? = nil) {
         self.list = list
         self.priority = priority
         self.tags = tags
         self.dueDate = dueDate
+        self.recurrence = recurrence
     }
 }
 
@@ -216,32 +223,44 @@ public class RemindersMCPServer {
 
     // MARK: - Consolidated MCP Tools
 
-    /// Unified single-reminder CRUD/complete/archive tool.
+    /// Unified single-reminder CRUD/complete/archive/move/archive tool with natural-language parsing.
     ///
-    /// ### Supported `action` values
-    /// - `create`: Provide `create { title, list?, notes?, dueDate? }`
-    /// - `read`: Provide `read { uuid }`
-    /// - `update`: Provide `update { uuid, title?, notes?, dueDate?, priority?, tags? }`
-    /// - `delete`: Provide `delete { uuid }`
-    /// - `complete` / `uncomplete`: Provide `{ uuid }`
-    /// - `move`: Provide `move { uuid, targetList }`
-    /// - `archive`: Provide `archive { uuid, archiveList?, createIfMissing?, source? }`
+    /// **When to use:** create/read/update/delete an individual reminder, complete/uncomplete, move between lists, or archive (with auto archive creation). Accepts natural-language titles such as `“Send report tomorrow 9am @Finance ^high”`.
     ///
-    /// ### Usage Tips
-    /// - Use `lists_list` to discover valid list identifiers before move/archive.
-    /// - `dueDate` accepts ISO8601 or natural language strings (`"tomorrow 5pm"`).
-    /// - `priority` accepts `high|medium|low|none` or numeric `0-9`.
+    /// ### Supported actions
+    /// | Action | Payload |
+    /// |--------|---------|
+    /// | `create` | `create { title, list?, notes?, dueDate?, priority? }` |
+    /// | `read` | `read { uuid }` |
+    /// | `update` | `update { uuid, title?, notes?, dueDate?, priority?, isCompleted? }` |
+    /// | `delete` / `complete` / `uncomplete` | `{ uuid }` |
+    /// | `move` | `move { uuid, targetList }` |
+    /// | `archive` | `archive { uuid, archiveList?, createIfMissing?, source? }` |
     ///
-    /// ### Example
+    /// Recurrence:
+    /// - Structured: `recurrence { "frequency": "weekly", "interval": 1, "daysOfWeek": ["monday"] }`
+    /// - Natural shorthand: append `~weekly`, `~every 2 weeks`, `~monthly on 15`, `~daily for 10`
+    ///
+    /// ### Sample prompts
+    /// - “Create ‘Prep slides tomorrow 10am @Work ^high ~weekly on Mondays’ and move it to ‘Projects’.”
+    /// - “Archive reminder `UUID-123` into the Archive list (create if missing).”
+    ///
+    /// ### Sample JSON
     /// ```json
     /// {
     ///   "request": {
     ///     "action": "create",
     ///     "create": {
-    ///       "title": "Book flights",
+    ///       "title": "Book flights tomorrow 9am @Travel ^high",
     ///       "list": "Travel",
+    ///       "notes": "Use miles for SFO→JFK",
     ///       "dueDate": "next friday 17:00",
-    ///       "priority": "high"
+    ///       "priority": "high",
+    ///       "recurrence": {
+    ///         "frequency": "weekly",
+    ///         "daysOfWeek": ["monday"],
+    ///         "end": { "type": "count", "value": "8" }
+    ///       }
     ///     }
     ///   }
     /// }
@@ -294,19 +313,28 @@ public class RemindersMCPServer {
 
     /// Batch reminder operations with optional dry-run reporting.
     ///
-    /// ### Supported `action` values
-    /// - `complete`, `uncomplete`
-    /// - `delete`
-    /// - `move` (requires `fields.targetList`)
-    /// - `archive` (requires `fields.archiveList?`, `fields.createIfMissing?`)
+    /// **When to use:** run the same mutation over many reminders (complete all overdue items, move a batch to another list, archive multiple UUIDs). Supports dry runs so you can check results before committing.
     ///
-    /// ### Example
+    /// | Action | Notes |
+    /// |--------|-------|
+    /// | `update` | `fields` may include `title`, `notes`, `dueDate`, `priority`, `isCompleted` |
+    /// | `complete`, `uncomplete`, `delete` | only `uuids` required |
+    /// | `move` | include `fields.targetList` |
+    /// | `archive` | include `fields.archiveList?`, `fields.createArchiveIfMissing?` |
+    ///
+    /// ### Sample prompt
+    /// “Archive every reminder returned by my last search, dry-run first, then apply if no errors.”
+    ///
+    /// ### Sample JSON
     /// ```json
     /// {
     ///   "request": {
     ///     "action": "move",
     ///     "uuids": ["UUID-1", "UUID-2"],
-    ///     "fields": { "targetList": "Archive" },
+    ///     "fields": {
+    ///       "targetList": "Archive",
+    ///       "createArchiveIfMissing": true
+    ///     },
     ///     "dryRun": true
     ///   }
     /// }
@@ -358,13 +386,13 @@ public class RemindersMCPServer {
 
     /// Advanced reminder search with logic trees, natural language dates, grouping, and pagination.
     ///
-    /// ### Logic tree helpers
-    /// - Use `logic.all` for AND, `logic.any` for OR, `logic.not` to invert.
-    /// - Leaf nodes use `{ "clause": { "field": "priority", "op": "in", "value": ["high","medium"] } }`.
-    /// - Supported fields: `title`, `notes`, `list`, `priority`, `tag`, `dueDate`, `createdAt`, `updatedAt`, `completed`, `hasDueDate`, `hasNotes`.
-    /// - Date literals accept ISO8601 or natural phrases (`"today"`, `"next week"`, `"friday+2"`).
+    /// **Capabilities:** nested AND/OR/NOT logic via `logic`, fuzzy `query`, grouping (`groupBy`), multi-key sorting (`sort`), pagination, list filters, and natural dates (`today`, `tomorrow`, `friday+2`, `start of week`, etc.).
     ///
-    /// ### Example payload
+    /// ### Sample prompts
+    /// - “Find high-priority Work reminders due this week, grouped by list, sorted by due date ascending.”
+    /// - “Show all reminders tagged #delegated that are overdue or due today.”
+    ///
+    /// ### Sample JSON
     /// ```json
     /// {
     ///   "request": {
@@ -373,18 +401,21 @@ public class RemindersMCPServer {
     ///         { "clause": { "field": "priority", "op": "in", "value": ["high","medium"] } },
     ///         { "clause": { "field": "list", "op": "equals", "value": "Work" } },
     ///         { "clause": { "field": "dueDate", "op": "lessOrEqual", "value": "end of week" } }
-    ///       ]
+    ///       ],
+    ///       "not": {
+    ///         "clause": { "field": "tag", "op": "includes", "value": "delegated" }
+    ///       }
     ///     },
-    ///     "sort": [{ "field": "dueDate", "direction": "asc" }],
-    ///     "pagination": { "limit": 25 }
+    ///     "groupBy": [{ "field": "list" }, { "field": "priority" }],
+    ///     "sort": [
+    ///       { "field": "dueDate", "direction": "asc" },
+    ///       { "field": "priority", "direction": "desc" }
+    ///     ],
+    ///     "pagination": { "limit": 25 },
+    ///     "includeCompleted": false
     ///   }
     /// }
     /// ```
-    ///
-    /// ### Sample response fields
-    /// - `reminders[n].uuid`, `title`, `list`, `priority`, `dueDate`
-    /// - `totalCount`: total before pagination
-    /// - `groups`: optional aggregation results keyed by `field`
     ///
     /// ### Request tips
     /// - `logic`: structured filtering (preferred over ad-hoc parsing).
@@ -453,18 +484,16 @@ public class RemindersMCPServer {
 
     /// List discovery, creation, deletion, and archive helpers.
     ///
-    /// ### Supported actions
-    /// - `list`: `{ "includeReadOnly": false }` lists available reminder lists.
-    /// - `create`: `{ "name": "Projects", "source": "iCloud" }`.
-    /// - `delete`: `{ "identifier": "<list name or UUID>" }`.
-    /// - `ensureArchive`: `{ "name": "Archive", "createIfMissing": true }`.
+    /// **When to use:** discover valid list identifiers, create/delete lists, or guarantee an Archive list exists before bulk moves.
     ///
-    /// ### Example
-    /// ```json
-    /// { "request": { "action": "create", "create": { "name": "Projects", "source": "iCloud" } } }
-    /// ```
+    /// | Action | Example payload |
+    /// |--------|-----------------|
+    /// | `list` | `{ "request": { "action": "list", "list": { "includeReadOnly": false } } }` |
+    /// | `create` | `{ "request": { "action": "create", "create": { "name": "Projects", "source": "iCloud" } } }` |
+    /// | `delete` | `{ "request": { "action": "delete", "delete": { "identifier": "Work" } } }` |
+    /// | `ensureArchive` | `{ "request": { "action": "ensureArchive", "ensureArchive": { "name": "Archive", "createIfMissing": true } } }` |
     ///
-    /// Use `list` results to drive other tools (eg. `move`, `archive`) so you always pass valid identifiers.
+    /// **Sample prompt:** “List all writable reminder lists and ensure there is an Archive list (create if needed).”
     @MCPTool
     public func reminders_lists(_ request: ListsRequest) async throws -> ListsResponse {
         switch request.action {
@@ -495,10 +524,16 @@ public class RemindersMCPServer {
 
     /// Aggregate reminder analytics (overview mode).
     ///
+    /// **When to use:** you need a dashboard-style snapshot (totals, overdue counts, due-today, list/priority breakdowns) instead of enumerating individual reminders.
+    ///
     /// Returns counts for:
     /// - completed vs incomplete
     /// - overdue, due today, due this week
     /// - per-priority and per-list distribution
+    ///
+    /// ### Sample prompts
+    /// - “Summarize my reminders: how many overdue, due today, and the busiest lists?”
+    /// - “Give me a priority histogram so I can see how many highs vs lows remain.”
     ///
     /// ### Example request
     /// ```json
@@ -532,6 +567,20 @@ public class RemindersMCPServer {
         case .overview:
             return try await performOverviewAnalysis()
         }
+    }
+
+    // MARK: - Documentation Resources
+
+    /// Quick reference for the five consolidated tools (purpose, sample payloads, prompts).
+    @MCPResource("docs://reminders/overview", name: "Reminders MCP Overview", mimeType: "text/markdown")
+    func remindersOverviewResource() -> String {
+        MCPDocs.toolOverview
+    }
+
+    /// SQL-like search/filter cheat sheet (operators, shortcuts, examples).
+    @MCPResource("docs://reminders/filter-cheatsheet", name: "Reminders Filter Cheatsheet", mimeType: "text/markdown")
+    func remindersFilterCheatsheetResource() -> String {
+        MCPDocs.filterDetails
     }
 
     // MARK: - Manage Action Helpers
@@ -568,6 +617,12 @@ public class RemindersMCPServer {
         }
 
         let dueComponents = try resolveDueDate(explicit: payload.dueDate, inferred: metadata.dueDate)
+        let recurrenceInstruction = try resolveRecurrenceInstruction(
+            payload: payload.recurrence,
+            metadataPattern: metadata.recurrencePattern,
+            dueDateComponents: dueComponents
+        )
+        var parsedRecurrence: ParsedField?
 
         if payload.dueDate == nil, metadata.dueDate != nil {
             if let naturalDate = metadata.dueDate?.date {
@@ -586,11 +641,23 @@ public class RemindersMCPServer {
             priority: priorityValue
         )
 
+        switch recurrenceInstruction {
+        case .set(let build):
+            reminder.recurrenceRules = [build.rule]
+            parsedRecurrence = build.parsedField
+            try reminders.updateReminder(reminder)
+        case .remove:
+            reminder.recurrenceRules = nil
+        case .none:
+            break
+        }
+
         let parsedMetadata = ParsedMetadata(
             list: parsedList,
             priority: parsedPriority,
             tags: parsedTags,
-            dueDate: parsedDueDate
+            dueDate: parsedDueDate,
+            recurrence: parsedRecurrence
         )
 
         return ManageResponse(reminder: reminder, message: "Reminder created", parsed: parsedMetadata)
@@ -604,9 +671,13 @@ public class RemindersMCPServer {
     private func handleManageUpdate(_ payload: ManageUpdatePayload) throws -> ManageResponse {
         let reminder = try resolveReminder(uuid: payload.uuid)
 
+        var metadataRecurrencePattern: String?
+        var parsedRecurrence: ParsedField?
+
         if let title = payload.title {
             let metadata = TitleParser.parse(title)
             reminder.title = metadata.cleanedTitle
+            metadataRecurrencePattern = metadata.recurrencePattern
 
             if payload.priority == nil, let extractedPriority = metadata.priority {
                 reminder.priority = Int(extractedPriority.value.rawValue)
@@ -640,8 +711,27 @@ public class RemindersMCPServer {
             }
         }
 
+        if payload.recurrence != nil || metadataRecurrencePattern != nil {
+            let recurrenceInstruction = try resolveRecurrenceInstruction(
+                payload: payload.recurrence,
+                metadataPattern: metadataRecurrencePattern,
+                dueDateComponents: reminder.dueDateComponents
+            )
+
+            switch recurrenceInstruction {
+            case .set(let build):
+                reminder.recurrenceRules = [build.rule]
+                parsedRecurrence = build.parsedField
+            case .remove:
+                reminder.recurrenceRules = nil
+            case .none:
+                break
+            }
+        }
+
         try reminders.updateReminder(reminder)
-        return ManageResponse(reminder: reminder, message: "Reminder updated")
+        let parsedMetadata = parsedRecurrence.map { ParsedMetadata(recurrence: $0) }
+        return ManageResponse(reminder: reminder, message: "Reminder updated", parsed: parsedMetadata)
     }
 
     private func handleManageDelete(uuid: String) throws -> ManageResponse {
@@ -679,6 +769,433 @@ public class RemindersMCPServer {
         try reminders.updateReminder(reminder)
         return ManageResponse(reminder: reminder, message: "Reminder archived to \(archiveCalendar.title)")
     }
+
+    // MARK: - Recurrence Helpers
+
+    private enum RecurrenceInstruction {
+        case none
+        case set(RecurrenceBuildResult)
+        case remove
+    }
+
+    private struct RecurrenceBuildResult {
+        let rule: EKRecurrenceRule
+        let parsedField: ParsedField?
+    }
+
+    private enum RecurrenceEndDescriptor {
+        case never
+        case count(Int)
+        case date(Date)
+    }
+
+    private struct RecurrenceSpec {
+        let frequency: RecurrenceFrequency
+        let interval: Int
+        let daysOfWeek: [Weekday]?
+        let dayOfMonth: Int?
+        let end: RecurrenceEndDescriptor?
+        let sourcePattern: String?
+
+        func summary() -> String {
+            var parts: [String] = []
+            let intervalText: String
+            switch frequency {
+            case .daily:
+                intervalText = interval == 1 ? "Every day" : "Every \(interval) days"
+            case .weekly:
+                intervalText = interval == 1 ? "Every week" : "Every \(interval) weeks"
+            case .monthly:
+                intervalText = interval == 1 ? "Every month" : "Every \(interval) months"
+            case .yearly:
+                intervalText = interval == 1 ? "Every year" : "Every \(interval) years"
+            }
+            parts.append(intervalText)
+
+            if frequency == .weekly, let days = daysOfWeek, !days.isEmpty {
+                let names = days.map { $0.displayName }
+                parts.append("on " + names.joined(separator: ", "))
+            }
+
+            if frequency == .monthly, let day = dayOfMonth {
+                parts.append("on day \(day)")
+            }
+
+            if let end = end {
+                switch end {
+                case .never:
+                    break
+                case .count(let count):
+                    parts.append("for \(count) occurrence\(count == 1 ? "" : "s")")
+                case .date(let date):
+                    let formatter = DateFormatter()
+                    formatter.dateStyle = .medium
+                    formatter.timeStyle = .none
+                    parts.append("until \(formatter.string(from: date))")
+                }
+            }
+
+            return parts.joined(separator: ", ")
+        }
+    }
+
+    private enum Weekday: Int, CaseIterable {
+        case sunday = 1, monday, tuesday, wednesday, thursday, friday, saturday
+
+        init?(string: String) {
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            switch trimmed {
+            case "sun", "sunday": self = .sunday
+            case "mon", "monday": self = .monday
+            case "tue", "tues", "tuesday": self = .tuesday
+            case "wed", "wednesday": self = .wednesday
+            case "thu", "thur", "thurs", "thursday": self = .thursday
+            case "fri", "friday": self = .friday
+            case "sat", "saturday": self = .saturday
+            default: return nil
+            }
+        }
+
+        var displayName: String {
+            switch self {
+            case .sunday: return "Sunday"
+            case .monday: return "Monday"
+            case .tuesday: return "Tuesday"
+            case .wednesday: return "Wednesday"
+            case .thursday: return "Thursday"
+            case .friday: return "Friday"
+            case .saturday: return "Saturday"
+            }
+        }
+
+        var recurrenceDay: EKRecurrenceDayOfWeek {
+            EKRecurrenceDayOfWeek(EKWeekday(rawValue: rawValue)!)
+        }
+    }
+
+    private func resolveRecurrenceInstruction(
+        payload: RecurrencePayload?,
+        metadataPattern: String?,
+        dueDateComponents: DateComponents?
+    ) throws -> RecurrenceInstruction {
+        if payload == nil && metadataPattern == nil {
+            return .none
+        }
+
+        if payload?.remove == true {
+            return .remove
+        }
+
+        let normalizedMetadata = metadataPattern?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let pattern = normalizedMetadata, Self.recurrenceRemovalKeywords.contains(pattern.lowercased()) {
+            return .remove
+        }
+
+        if let payloadPattern = payload?.pattern?.lowercased(), Self.recurrenceRemovalKeywords.contains(payloadPattern.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return .remove
+        }
+
+        guard let specResult = try recurrenceSpec(from: payload, metadataPattern: metadataPattern, dueDateComponents: dueDateComponents) else {
+            return .none
+        }
+
+        let rule = try buildRecurrenceRule(from: specResult.spec)
+        let summary = specResult.spec.summary()
+        let original = specResult.original ?? specResult.spec.sourcePattern
+        let parsedField = original.map { ParsedField(original: "~\($0)", parsed: summary) }
+        return .set(RecurrenceBuildResult(rule: rule, parsedField: parsedField))
+    }
+
+    private func recurrenceSpec(
+        from payload: RecurrencePayload?,
+        metadataPattern: String?,
+        dueDateComponents: DateComponents?
+    ) throws -> (spec: RecurrenceSpec, original: String?)? {
+        if let payload = payload {
+            if let spec = try spec(from: payload, dueDateComponents: dueDateComponents) {
+                return (spec, payload.pattern)
+            }
+        }
+
+        guard let pattern = (payload?.pattern ?? metadataPattern)?.trimmingCharacters(in: .whitespacesAndNewlines), !pattern.isEmpty else {
+            return nil
+        }
+
+        guard let spec = try spec(fromPattern: pattern, dueDateComponents: dueDateComponents) else {
+            return nil
+        }
+        return (spec, pattern)
+    }
+
+    private func spec(from payload: RecurrencePayload, dueDateComponents: DateComponents?) throws -> RecurrenceSpec? {
+        let hasStructuredFields = payload.frequency != nil || payload.interval != nil || payload.daysOfWeek != nil || payload.dayOfMonth != nil || payload.end != nil
+        if !hasStructuredFields, payload.pattern == nil {
+            return nil
+        }
+
+        guard let frequency = payload.frequency else {
+            if let pattern = payload.pattern {
+                return try spec(fromPattern: pattern, dueDateComponents: dueDateComponents)
+            }
+            return nil
+        }
+
+        let interval = max(payload.interval ?? 1, 1)
+        var days: [Weekday]? = nil
+        if let dayStrings = payload.daysOfWeek {
+            days = try mapWeekdays(dayStrings)
+        }
+
+        let dayOfMonth = payload.dayOfMonth
+        if let day = dayOfMonth, !(1...31).contains(day) {
+            throw RemindersMCPError.invalidArguments("dayOfMonth must be between 1 and 31")
+        }
+
+        let endDescriptor = try parseEndDescriptor(payload.end)
+
+        return try finalizeSpec(
+            frequency: frequency,
+            interval: interval,
+            daysOfWeek: days,
+            dayOfMonth: dayOfMonth,
+            end: endDescriptor,
+            sourcePattern: payload.pattern,
+            dueDateComponents: dueDateComponents
+        )
+    }
+
+    private func spec(fromPattern pattern: String, dueDateComponents: DateComponents?) throws -> RecurrenceSpec? {
+        let normalized = pattern.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+
+        if Self.recurrenceRemovalKeywords.contains(normalized) {
+            return nil
+        }
+
+        var interval = 1
+        var frequency: RecurrenceFrequency?
+        var days: [Weekday]? = nil
+        var dayOfMonth: Int?
+        var endDescriptor: RecurrenceEndDescriptor?
+
+        if normalized.contains("biweekly") || normalized.contains("fortnight") {
+            frequency = .weekly
+            interval = 2
+        }
+
+        if normalized.contains("quarter") {
+            frequency = .monthly
+            interval = 3
+        }
+
+        if frequency == nil {
+            if normalized.contains("daily") {
+                frequency = .daily
+            } else if normalized.contains("weekly") {
+                frequency = .weekly
+            } else if normalized.contains("monthly") {
+                frequency = .monthly
+            } else if normalized.contains("yearly") || normalized.contains("annually") {
+                frequency = .yearly
+            }
+        }
+
+        if let everyMatch = Self.everyRegex.firstMatch(in: normalized, options: [], range: NSRange(location: 0, length: normalized.count)),
+           let intervalRange = Range(everyMatch.range(at: 1), in: normalized),
+           let unitRange = Range(everyMatch.range(at: 2), in: normalized) {
+            interval = max(Int(normalized[intervalRange]) ?? 1, 1)
+            let unit = normalized[unitRange]
+            switch unit {
+            case "day", "days": frequency = .daily
+            case "week", "weeks": frequency = .weekly
+            case "month", "months": frequency = .monthly
+            case "year", "years": frequency = .yearly
+            default: break
+            }
+        }
+
+        if normalized.contains("every other week") {
+            frequency = .weekly
+            interval = 2
+        }
+
+        var working = normalized
+        if let untilRange = working.range(of: "until ") {
+            let endString = working[untilRange.upperBound...].trimmingCharacters(in: .whitespaces)
+            working = String(working[..<untilRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+            if let date = parseEndDateString(endString) {
+                endDescriptor = .date(date)
+            }
+        }
+
+        if let forRange = working.range(of: "for ") {
+            let countString = working[forRange.upperBound...].trimmingCharacters(in: .whitespaces)
+            working = String(working[..<forRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+            if let count = Int(countString.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()) {
+                endDescriptor = .count(max(count, 1))
+            }
+        }
+
+        if frequency == .weekly, let onRange = working.range(of: "on ") {
+            let tail = working[onRange.upperBound...]
+            let tokens = tail.components(separatedBy: CharacterSet(charactersIn: ",;"))
+            let trimmedTokens = tokens.flatMap { token -> [String] in
+                token
+                    .split(separator: " ")
+                    .map { String($0) }
+            }
+            let weekdays = try mapWeekdays(trimmedTokens)
+            if !weekdays.isEmpty {
+                days = weekdays
+            }
+        }
+
+        if frequency == .monthly {
+            if let match = Self.dayOfMonthRegex.firstMatch(in: working, options: [], range: NSRange(location: 0, length: working.count)),
+               let dayRange = Range(match.range(at: 1), in: working) {
+                let value = working[dayRange]
+                if let day = Int(value) {
+                    dayOfMonth = day
+                }
+            }
+        }
+
+        guard let freq = frequency else { return nil }
+
+        return try finalizeSpec(
+            frequency: freq,
+            interval: interval,
+            daysOfWeek: days,
+            dayOfMonth: dayOfMonth,
+            end: endDescriptor,
+            sourcePattern: pattern,
+            dueDateComponents: dueDateComponents
+        )
+    }
+
+    private func finalizeSpec(
+        frequency: RecurrenceFrequency,
+        interval: Int,
+        daysOfWeek: [Weekday]?,
+        dayOfMonth: Int?,
+        end: RecurrenceEndDescriptor?,
+        sourcePattern: String?,
+        dueDateComponents: DateComponents?
+    ) throws -> RecurrenceSpec {
+        var resolvedDays = daysOfWeek
+        var resolvedDayOfMonth = dayOfMonth
+
+        if frequency == .weekly, resolvedDays == nil {
+            guard let fallbackDay = defaultWeekday(from: dueDateComponents) else {
+                throw RemindersMCPError.invalidArguments("Provide dueDate (or specify daysOfWeek) when setting a weekly recurrence")
+            }
+            resolvedDays = [fallbackDay]
+        }
+
+        if frequency == .monthly, resolvedDayOfMonth == nil {
+            guard let fallback = dueDateComponents?.day else {
+                throw RemindersMCPError.invalidArguments("Provide dueDate (or dayOfMonth) when setting a monthly recurrence")
+            }
+            resolvedDayOfMonth = fallback
+        }
+
+        return RecurrenceSpec(
+            frequency: frequency,
+            interval: interval,
+            daysOfWeek: resolvedDays,
+            dayOfMonth: resolvedDayOfMonth,
+            end: end,
+            sourcePattern: sourcePattern
+        )
+    }
+
+    private func buildRecurrenceRule(from spec: RecurrenceSpec) throws -> EKRecurrenceRule {
+        let frequency = spec.frequency.ekFrequency
+        let days = spec.daysOfWeek?.map { $0.recurrenceDay }
+        let daysOfMonth = spec.dayOfMonth.map { [NSNumber(value: $0)] }
+        let end = recurrenceEnd(from: spec.end)
+
+        return EKRecurrenceRule(
+            recurrenceWith: frequency,
+            interval: spec.interval,
+            daysOfTheWeek: days,
+            daysOfTheMonth: daysOfMonth,
+            monthsOfTheYear: nil,
+            weeksOfTheYear: nil,
+            daysOfTheYear: nil,
+            setPositions: nil,
+            end: end
+        )
+    }
+
+    private func recurrenceEnd(from descriptor: RecurrenceEndDescriptor?) -> EKRecurrenceEnd? {
+        guard let descriptor else { return nil }
+        switch descriptor {
+        case .never:
+            return nil
+        case .count(let count):
+            return EKRecurrenceEnd(occurrenceCount: count)
+        case .date(let date):
+            return EKRecurrenceEnd(end: date)
+        }
+    }
+
+    private func parseEndDescriptor(_ payload: RecurrenceEndPayload?) throws -> RecurrenceEndDescriptor? {
+        guard let payload = payload else { return nil }
+        switch payload.type {
+        case .none:
+            return nil
+        case .some(.never):
+            return .never
+        case .some(.count):
+            guard let value = payload.value, let count = Int(value) else {
+                throw RemindersMCPError.invalidArguments("Provide numeric value for end.count")
+            }
+            return .count(max(count, 1))
+        case .some(.date):
+            guard let value = payload.value, let date = parseEndDateString(value) else {
+                throw RemindersMCPError.invalidArguments("Unable to parse end date: \(payload.value ?? "")")
+            }
+            return .date(date)
+        }
+    }
+
+    private func mapWeekdays(_ values: [String]) throws -> [Weekday] {
+        var weekdays: [Weekday] = []
+        for value in values {
+            if let day = Weekday(string: value) {
+                weekdays.append(day)
+            } else {
+                throw RemindersMCPError.invalidArguments("Unknown weekday: \(value)")
+            }
+        }
+        return weekdays
+    }
+
+    private func defaultWeekday(from components: DateComponents?) -> Weekday? {
+        guard let weekday = components?.weekday else { return nil }
+        return Weekday(rawValue: weekday)
+    }
+
+    private func parseEndDateString(_ string: String) -> Date? {
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let isoFormatter = ISO8601DateFormatter()
+        if let date = isoFormatter.date(from: trimmed) {
+            return date
+        }
+
+        if let components = DateComponents(argument: trimmed) {
+            return Calendar.current.date(from: components)
+        }
+
+        return nil
+    }
+
+    private static let recurrenceRemovalKeywords: Set<String> = ["none", "remove", "clear", "never"]
+    private static let everyRegex = try! NSRegularExpression(pattern: #"every\s+(\d+)\s+(day|days|week|weeks|month|months|year|years)"#, options: [])
+    private static let dayOfMonthRegex = try! NSRegularExpression(pattern: #"on\s+(?:the\s+)?(\d{1,2})"#, options: [])
 
     // MARK: - List Helpers
 
@@ -1464,8 +1981,19 @@ public class RemindersMCPServer {
         }
     }
 
-    private func log(_ message: String) {
-        guard verbose else { return }
-        fputs("[RemindersMCPServer] \(message)\n", stderr)
+private func log(_ message: String) {
+    guard verbose else { return }
+    fputs("[RemindersMCPServer] \(message)\n", stderr)
+}
+}
+
+private extension RecurrenceFrequency {
+    var ekFrequency: EKRecurrenceFrequency {
+        switch self {
+        case .daily: return .daily
+        case .weekly: return .weekly
+        case .monthly: return .monthly
+        case .yearly: return .yearly
+        }
     }
 }

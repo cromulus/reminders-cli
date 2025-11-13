@@ -877,7 +877,7 @@ func startServer(
         serverNameForProxy = "/\(mcpServer.serverName)"
         let transport = HTTPSSETransport(server: mcpServer, host: mcpHost, port: mcpPort)
         #if canImport(Logging)
-        transport.logger.logLevel = Logger.Level.info
+        transport.logger.logLevel = mapLogLevelToSwiftLogger(Logger.shared.level)
         #endif
 
         if requireAuth || (token != nil) {

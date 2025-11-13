@@ -166,9 +166,22 @@ The production builds include:
 - Debug symbols for troubleshooting
 - All dependencies statically linked
 
-## REST API Server
+## REST + MCP Servers
 
-This project includes a REST API server that allows you to interact with your reminders via HTTP requests. This is useful for building web applications, integrating with other services, or automating reminders management.
+Alongside the original CLI, the repository now ships two long-running services:
+
+- **REST server (`reminders-api`)** – JSON over HTTP for automations, dashboards, and webhook integrations.
+- **MCP server (`reminders-mcp`)** – A SwiftMCP transport that exposes five high-level tools (`reminders_manage`, `reminders_bulk`, `reminders_search`, `reminders_lists`, `reminders_analyze`) for LLM agents.
+
+Detailed usage notes (JSON schemas, examples, filter syntax, etc.) live under [`docs/mcp`](docs/mcp). Start with:
+
+- [`docs/mcp/USAGE.md`](docs/mcp/USAGE.md) – running the MCP transport, tool reference, sample requests/responses.
+- [`docs/mcp/filter-syntax.md`](docs/mcp/filter-syntax.md) – SQL-like filter grammar, shortcuts, wildcards, regex, and ordering.
+- [`docs/mcp/consolidated-tools-reference.md`](docs/mcp/consolidated-tools-reference.md) – quick lookup tables for each tool.
+
+### REST API Server
+
+The REST server allows you to interact with reminders over HTTP, which is useful for web apps, automations, or sharing the MCP transport and REST surface from a single binary.
 
 ### Installation and Setup
 
@@ -959,3 +972,51 @@ rm ~/Library/LaunchAgents/com.reminders.api.plist
 # Optionally remove logs
 rm -rf ~/Library/Logs/reminders-api/
 ```
+
+## MCP Server
+
+The MCP transport exposes the reminders data through a SwiftMCP tool surface so LLM agents can reason about lists, searches, and analytics. You can run it either as a dedicated process or embedded inside `reminders-api`.
+
+### Standalone transport
+
+```bash
+$ swift build
+$ ./.build/debug/reminders-mcp          # Defaults to HTTP SSE on 127.0.0.1:8081
+# or use release build
+$ ./.build/apple/Products/Release/reminders-mcp --port 9090 --token "abc123"
+```
+
+Command-line flags mirror the REST server (`--host`, `--port`, `--token`, `--verbose`). When launched, it announces the SSE endpoint (default `http://127.0.0.1:8081/mcp`) that MCP-compatible clients can connect to.
+
+### Embedded transport (reminders-api)
+
+`reminders-api` starts the MCP transport by default and proxies `/mcp`, `/messages`, etc. on the same HTTP port. Useful flags:
+
+```bash
+$ reminders-api --no-mcp                   # disable the embedded transport
+$ reminders-api --mcp-port 9091            # expose MCP on a dedicated port
+$ reminders-api --mcp-host 0.0.0.0         # bind SSE server to all interfaces
+```
+
+Authentication follows the same token rules as the REST endpoints.
+
+### Tool reference
+
+- `reminders_manage` – single-reminder CRUD/complete/archive (natural-language dates, smart parsing)
+- `reminders_bulk` – batch mutations (`complete`, `move`, `archive`, `delete`, dry-run support)
+- `reminders_search` – logic-tree queries with grouping, sorting, pagination, and SQL-like filter shortcuts
+- `reminders_lists` – discover/create/delete/ensure archive lists
+- `reminders_analyze` – overview statistics (totals, overdue counts, per-priority/list breakdowns)
+
+Each tool description in the MCP metadata now includes JSON schema examples, and the canonical docs with request/response samples live in [`docs/mcp/USAGE.md`](docs/mcp/USAGE.md).
+
+### Documentation resources
+
+The transport also exposes Markdown references via MCP resources:
+
+| URI | Purpose |
+|-----|---------|
+| `docs://reminders/overview` | Quick overview of every tool plus prompts and payload examples |
+| `docs://reminders/filter-cheatsheet` | SQL-like filter grammar, operators, shortcuts, and sample queries |
+
+Clients can read those resources through the standard `resources/list` + `resources/read` flow.

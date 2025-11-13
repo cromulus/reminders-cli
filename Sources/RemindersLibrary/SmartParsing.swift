@@ -46,12 +46,20 @@ public struct ReminderMetadata {
     public let tags: [String]
     public let dueDate: DateComponents?
 
-    public init(cleanedTitle: String, priority: Priority? = nil, listName: String? = nil, tags: [String] = [], dueDate: DateComponents? = nil) {
+    public let recurrencePattern: String?
+
+    public init(cleanedTitle: String,
+                priority: Priority? = nil,
+                listName: String? = nil,
+                tags: [String] = [],
+                dueDate: DateComponents? = nil,
+                recurrencePattern: String? = nil) {
         self.cleanedTitle = cleanedTitle
         self.priority = priority
         self.listName = listName
         self.tags = tags
         self.dueDate = dueDate
+        self.recurrencePattern = recurrencePattern
     }
 }
 
@@ -73,6 +81,7 @@ public struct TitleParser {
         var listName: String?
         var tags: [String] = []
         var dueDate: DateComponents?
+        var recurrencePattern: String?
 
         // Regular expressions for metadata markers
         // Priority with ! prefix: !high, !3, !urgent, !medium, !2, !low, !1, !none, !0
@@ -113,6 +122,23 @@ public struct TitleParser {
         cleanedTitle = cleanedTitle.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
         cleanedTitle = cleanedTitle.trimmingCharacters(in: .whitespaces)
 
+        // Recurrence marker using ~ syntax (eg: ~weekly, ~every 2 weeks)
+        if let regex = try? NSRegularExpression(pattern: #"~([^@#!^]+)"#, options: [.caseInsensitive]) {
+            let range = NSRange(cleanedTitle.startIndex..<cleanedTitle.endIndex, in: cleanedTitle)
+            if let match = regex.firstMatch(in: cleanedTitle, options: [], range: range),
+               match.numberOfRanges > 1,
+               let fullRange = Range(match.range(at: 0), in: cleanedTitle),
+               let captureRange = Range(match.range(at: 1), in: cleanedTitle) {
+                let value = cleanedTitle[captureRange].trimmingCharacters(in: .whitespacesAndNewlines)
+                if !value.isEmpty {
+                    recurrencePattern = value
+                }
+                cleanedTitle.removeSubrange(fullRange)
+                cleanedTitle = cleanedTitle.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+                cleanedTitle = cleanedTitle.trimmingCharacters(in: .whitespaces)
+            }
+        }
+
         // Natural language date - try to find dates in the remaining text
         // Use NSDataDetector to find date phrases
         if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue) {
@@ -144,7 +170,8 @@ public struct TitleParser {
             priority: priority,
             listName: listName,
             tags: tags,
-            dueDate: dueDate
+            dueDate: dueDate,
+            recurrencePattern: recurrencePattern
         )
     }
 }
