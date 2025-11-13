@@ -91,6 +91,48 @@ public struct RecurrencePayload: Decodable, Sendable {
     }
 }
 
+public enum AlarmProximity: String, Decodable, Sendable {
+    case arrival
+    case departure
+    case any
+}
+
+@Schema
+public struct LocationAlarmPayload: Decodable, Sendable {
+    /// Human-friendly label shown in Reminders.app.
+    public let title: String
+    /// Latitude in decimal degrees.
+    public let latitude: Double
+    /// Longitude in decimal degrees.
+    public let longitude: Double
+    /// Optional geofence radius in meters.
+    public let radius: Double?
+    /// Trigger when arriving, departing, or either.
+    public let proximity: AlarmProximity?
+    /// Optional note to append when parsing titles.
+    public let note: String?
+    /// Set to `true` to remove any structured-location alarms.
+    public let remove: Bool?
+
+    public init(
+        title: String,
+        latitude: Double,
+        longitude: Double,
+        radius: Double? = nil,
+        proximity: AlarmProximity? = nil,
+        note: String? = nil,
+        remove: Bool? = nil
+    ) {
+        self.title = title
+        self.latitude = latitude
+        self.longitude = longitude
+        self.radius = radius
+        self.proximity = proximity
+        self.note = note
+        self.remove = remove
+    }
+}
+
 public enum ManageAction: String, Decodable, Sendable {
     case create
     case read
@@ -198,6 +240,8 @@ public struct ManageCreatePayload: Decodable, Sendable {
     public let priority: String?
     /// Recurrence descriptor (object or shorthand string). Use `{ "frequency": "weekly", "interval": 1 }` or `"weekly"`.
     public let recurrence: RecurrencePayload?
+    /// Location-based alarm descriptor.
+    public let location: LocationAlarmPayload?
 }
 
 /// Wrapper for simple UUID-only requests.
@@ -218,6 +262,8 @@ public struct ManageUpdatePayload: Decodable, Sendable {
     public let isCompleted: Bool?
     /// Recurrence descriptor. Set `{ "remove": true }` to clear recurrence.
     public let recurrence: RecurrencePayload?
+    /// Location alarm descriptor. Set `{ "remove": true }` to clear.
+    public let location: LocationAlarmPayload?
 }
 
 /// Move an existing reminder to a different list.

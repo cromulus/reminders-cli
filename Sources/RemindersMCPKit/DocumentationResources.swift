@@ -12,7 +12,7 @@ enum MCPDocs {
     static let filterDetails = """
 # Search Filter Quick Reference
 
-- Logical operators: AND, OR, NOT, parentheses
+- Logical operators: AND, OR, NOT (use the structured `logic` tree for grouping—parentheses in the SQL-like string are not supported yet)
 - Operators: =, !=, <, >, <=, >=, CONTAINS, LIKE, MATCHES, IN, BETWEEN
 - Fields: title, notes, list, priority, tag, dueDate, createdAt, updatedAt, completed, hasDueDate, hasNotes
 - Natural dates: today, tomorrow, now, friday+2, start of week, end of month
@@ -43,8 +43,10 @@ Per the [Model Context Protocol server tools spec (rev 2025-03-26)](https://gith
 - **Use when:** creating, reading, updating, deleting, completing, uncompleting, moving, or archiving one reminder.
 - **Natural language helpers:** titles can embed `@list`, `!priority`, `#tags`, date phrases, and recurrence shorthands (`~weekly`, `~every 2 weeks`, `~monthly on 15`).
 - **Recurrence:** set a `recurrence` object (`frequency`, `interval`, `daysOfWeek`, `dayOfMonth`, `end`, `remove`) *or* rely on the `~` shorthand.
+- **Location alarms:** add `location { title, latitude, longitude, radius?, proximity? }` to attach a geofence trigger.
+- **Limitations:** EventKit will not let us set attachments or the `url` field, and only one structured location alarm is supported per reminder.
 
-**Sample prompt:** “Create ‘Team sync tomorrow 9am @Work ^high ~weekly on Monday’ and archive reminder `UUID-123`.”
+**Sample prompt:** “Create ‘Team sync tomorrow 9am @Work ^high ~weekly on Monday’ with an arrival alarm at HQ and archive reminder `UUID-123`.”
 
 **Sample JSON**
 ```jsonc
@@ -59,6 +61,13 @@ Per the [Model Context Protocol server tools spec (rev 2025-03-26)](https://gith
         "frequency": "weekly",
         "daysOfWeek": ["monday"],
         "end": { "type": "count", "value": "8" }
+      },
+      "location": {
+        "title": "HQ Office",
+        "latitude": 37.3317,
+        "longitude": -122.0301,
+        "radius": 75,
+        "proximity": "arrival"
       }
     }
   }
@@ -83,9 +92,12 @@ Per the [Model Context Protocol server tools spec (rev 2025-03-26)](https://gith
 }
 ```
 
+**Limitations:** bulk updates can only touch `title`, `notes`, `dueDate`, `priority`, `isCompleted`, `targetList`, and archive options—attachments, subtasks, and alarms stay untouched for safety.
+
 ## reminders_search — advanced logic tree queries
 - **Use when:** you need grouping, pagination, ordering, or SQL-like filter strings (`priority = 'high' AND dueDate < 'next week'`).
 - **Helpers:** natural-language dates, shortcuts (`overdue`, `due_today`, `high_priority`), and nested `logic` trees.
+- **Limitations:** parentheses in the SQL-like `filter` string are not supported yet; use the structured `logic` object for grouping.
 
 **Sample prompt:** “Find high or medium Work reminders due this week, grouped by list then priority.”
 
@@ -120,12 +132,17 @@ Per the [Model Context Protocol server tools spec (rev 2025-03-26)](https://gith
 ```
 
 ## reminders_analyze — overview statistics
-- **Use when:** you want a dashboard snapshot (totals, overdue counts, due-today, per-priority/list breakdowns).
-- **Current modes:** `{ "mode": "overview" }` or omit to default to overview.
+- **Use when:** you want a dashboard snapshot (overview), list leaderboard, priority histogram, due-window buckets, or recurrence stats.
+- **Modes:** `overview` (default), `lists`, `priority`, `dueWindows`, `recurrence`.
+- **Tuning:** set `upcomingWindowDays` (1–30, default 7) to control how “due soon” is computed.
+- **Limitations:** analytics operate on the reminders currently available on this device (no historical trend data) and do not include raw reminder payloads.
 
 ```jsonc
 {
-  "request": { "mode": "overview" }
+  "request": {
+    "mode": "dueWindows",
+    "upcomingWindowDays": 10
+  }
 }
 ```
 

@@ -1,5 +1,6 @@
 import EventKit
 import Foundation
+import CoreLocation
 import SwiftMCP
 import RemindersLibrary
 
@@ -20,19 +21,21 @@ public struct ParsedMetadata: Encodable {
     public let priority: ParsedField?
     public let tags: [ParsedField]?
     public let dueDate: ParsedField?
-
     public let recurrence: ParsedField?
+    public let location: ParsedField?
 
     public init(list: ParsedField? = nil,
                 priority: ParsedField? = nil,
                 tags: [ParsedField]? = nil,
                 dueDate: ParsedField? = nil,
-                recurrence: ParsedField? = nil) {
+                recurrence: ParsedField? = nil,
+                location: ParsedField? = nil) {
         self.list = list
         self.priority = priority
         self.tags = tags
         self.dueDate = dueDate
         self.recurrence = recurrence
+        self.location = location
     }
 }
 
@@ -116,12 +119,17 @@ public struct ListsEnsureArchivePayload: Decodable {
     public let source: String?
 }
 
-public enum AnalyzeMode: String, Decodable {
+public enum AnalyzeMode: String, Codable {
     case overview
+    case lists
+    case priority
+    case dueWindows
+    case recurrence
 }
 
 public struct AnalyzeRequest: Decodable {
     public let mode: AnalyzeMode?
+    public let upcomingWindowDays: Int?
 }
 
 public struct SearchResponse: Encodable {
@@ -194,15 +202,49 @@ public struct BulkResponse: Encodable {
     }
 }
 
+public struct AnalyzeSummary: Encodable {
+    public let total: Int
+    public let completed: Int
+    public let incomplete: Int
+    public let overdue: Int
+    public let dueToday: Int
+    public let dueWithinWindow: Int
+    public let upcomingWindowDays: Int
+}
+
+public struct AnalyzeListBreakdown: Encodable {
+    public let list: String
+    public let total: Int
+    public let completed: Int
+    public let overdue: Int
+    public let recurring: Int
+}
+
+public struct AnalyzePriorityBreakdown: Encodable {
+    public let priority: String
+    public let total: Int
+    public let completed: Int
+    public let overdue: Int
+}
+
+public struct AnalyzeDueWindow: Encodable {
+    public let label: String
+    public let count: Int
+}
+
+public struct AnalyzeRecurrenceStats: Encodable {
+    public let recurring: Int
+    public let nonRecurring: Int
+    public let byFrequency: [String: Int]
+}
+
 public struct AnalyzeResponse: Encodable {
-    public let totalReminders: Int
-    public let completedCount: Int
-    public let incompleteCount: Int
-    public let overdueCount: Int
-    public let dueTodayCount: Int
-    public let dueThisWeekCount: Int
-    public let byPriority: [String: Int]
-    public let byList: [String: Int]
+    public let mode: AnalyzeMode
+    public let summary: AnalyzeSummary?
+    public let lists: [AnalyzeListBreakdown]?
+    public let priorities: [AnalyzePriorityBreakdown]?
+    public let dueWindows: [AnalyzeDueWindow]?
+    public let recurrence: AnalyzeRecurrenceStats?
 }
 
 @MCPServer
@@ -241,6 +283,8 @@ public class RemindersMCPServer {
     /// - Structured: `recurrence { "frequency": "weekly", "interval": 1, "daysOfWeek": ["monday"] }`
     /// - Natural shorthand: append `~weekly`, `~every 2 weeks`, `~monthly on 15`, `~daily for 10`
     ///
+    /// **Limitations:** Apple’s EventKit does not let us set attachments or the `url` field, and only one structured location alarm is supported per reminder.
+    ///
     /// ### Sample prompts
     /// - “Create ‘Prep slides tomorrow 10am @Work ^high ~weekly on Mondays’ and move it to ‘Projects’.”
     /// - “Archive reminder `UUID-123` into the Archive list (create if missing).”
@@ -260,6 +304,13 @@ public class RemindersMCPServer {
     ///         "frequency": "weekly",
     ///         "daysOfWeek": ["monday"],
     ///         "end": { "type": "count", "value": "8" }
+    ///       },
+    ///       "location": {
+    ///         "title": "HQ Office",
+    ///         "latitude": 37.3317,
+    ///         "longitude": -122.0301,
+    ///         "radius": 75,
+    ///         "proximity": "arrival"
     ///       }
     ///     }
     ///   }
@@ -341,6 +392,8 @@ public class RemindersMCPServer {
     /// ```
     ///
     /// Dry-runs report what *would* change without mutating reminders.
+    ///
+    /// **Limitations:** bulk mode intentionally ignores attachments, subtasks, and structured location alarms.
     @MCPTool
     public func reminders_bulk(_ request: BulkRequest) async throws -> BulkResponse {
         guard !request.uuids.isEmpty else {
@@ -416,6 +469,8 @@ public class RemindersMCPServer {
     ///   }
     /// }
     /// ```
+    ///
+    /// **Limitations:** parentheses inside the SQL-like `filter` string are not supported yet—use the structured `logic` tree for nested groups.
     ///
     /// ### Request tips
     /// - `logic`: structured filtering (preferred over ad-hoc parsing).
@@ -522,50 +577,48 @@ public class RemindersMCPServer {
         }
     }
 
-    /// Aggregate reminder analytics (overview mode).
+    /// Aggregate reminder analytics with multiple modes.
     ///
-    /// **When to use:** you need a dashboard-style snapshot (totals, overdue counts, due-today, list/priority breakdowns) instead of enumerating individual reminders.
+    /// **When to use:** you need a dashboard-style snapshot (overview), a per-list scoreboard, priority histogram, due-window buckets, or recurrence stats without iterating through individual reminders.
     ///
-    /// Returns counts for:
-    /// - completed vs incomplete
-    /// - overdue, due today, due this week
-    /// - per-priority and per-list distribution
+    /// Modes:
+    /// - `overview` (default) – summary + list and priority breakdowns
+    /// - `lists` – focus on list totals, overdue counts, and recurrence per list
+    /// - `priority` – priority histogram with completion/overdue counts
+    /// - `dueWindows` – buckets reminders into `overdue`, `today`, `next N days`, `later`, `unscheduled`
+    /// - `recurrence` – recurring vs one-off distribution, grouped by frequency
+    ///
+    /// **Limitations:** analytics operate on the reminders currently available on this device (no historical trend data) and do not include raw reminder payloads.
     ///
     /// ### Sample prompts
     /// - “Summarize my reminders: how many overdue, due today, and the busiest lists?”
     /// - “Give me a priority histogram so I can see how many highs vs lows remain.”
+    /// - “Show a table of lists sorted by how many overdue items they have.”
     ///
     /// ### Example request
     /// ```json
-    /// { "request": { "mode": "overview" } }
+    /// { "request": { "mode": "dueWindows", "upcomingWindowDays": 10 } }
     /// ```
     ///
-    /// ### Example response
-    /// ```json
-    /// {
-    ///   "summary": {
-    ///     "total": 246,
-    ///     "completed": 120,
-    ///     "incomplete": 126,
-    ///     "overdue": 14,
-    ///     "dueToday": 6,
-    ///     "dueThisWeek": 22
-    ///   },
-    ///   "byPriority": { "high": 8, "medium": 41, "low": 77, "none": 120 },
-    ///   "byList": [
-    ///     { "list": "One - Quick", "count": 34 },
-    ///     { "list": "Inbox", "count": 18 }
-    ///   ]
-    /// }
-    /// ```
-    ///
-    /// Future modes can expand the `AnalyzeRequest` enum; for now send `{ "mode": "overview" }` or omit the body.
+    /// Set `upcomingWindowDays` (1-30) to control how “due soon” windows are calculated; defaults to 7 days.
     @MCPTool
     public func reminders_analyze(_ request: AnalyzeRequest? = nil) async throws -> AnalyzeResponse {
         let mode = request?.mode ?? .overview
+        let windowDays = max(1, min(30, request?.upcomingWindowDays ?? 7))
+        let calendars = reminders.getCalendars()
+        let allReminders = try await fetchReminders(on: calendars, display: .all)
+
         switch mode {
         case .overview:
-            return try await performOverviewAnalysis()
+            return buildOverviewAnalysis(reminders: allReminders, windowDays: windowDays)
+        case .lists:
+            return buildListAnalysis(reminders: allReminders, windowDays: windowDays)
+        case .priority:
+            return buildPriorityAnalysis(reminders: allReminders, windowDays: windowDays)
+        case .dueWindows:
+            return buildDueWindowAnalysis(reminders: allReminders, windowDays: windowDays)
+        case .recurrence:
+            return buildRecurrenceAnalysis(reminders: allReminders, windowDays: windowDays)
         }
     }
 
@@ -592,7 +645,7 @@ public class RemindersMCPServer {
         var parsedPriority: ParsedField?
         var parsedTags: [ParsedField]?
         var parsedDueDate: ParsedField?
-
+        var parsedLocation: ParsedField?
         let listIdentifier: String
         if let explicitList = payload.list, !explicitList.isEmpty {
             listIdentifier = explicitList
@@ -623,6 +676,7 @@ public class RemindersMCPServer {
             dueDateComponents: dueComponents
         )
         var parsedRecurrence: ParsedField?
+        var needsSave = false
 
         if payload.dueDate == nil, metadata.dueDate != nil {
             if let naturalDate = metadata.dueDate?.date {
@@ -645,11 +699,22 @@ public class RemindersMCPServer {
         case .set(let build):
             reminder.recurrenceRules = [build.rule]
             parsedRecurrence = build.parsedField
-            try reminders.updateReminder(reminder)
+            needsSave = true
         case .remove:
             reminder.recurrenceRules = nil
+            needsSave = true
         case .none:
             break
+        }
+
+        let locationResult = try applyLocationInstruction(payload.location, to: reminder)
+        if locationResult.changed {
+            parsedLocation = locationResult.parsedField
+            needsSave = true
+        }
+
+        if needsSave {
+            try reminders.updateReminder(reminder)
         }
 
         let parsedMetadata = ParsedMetadata(
@@ -657,7 +722,8 @@ public class RemindersMCPServer {
             priority: parsedPriority,
             tags: parsedTags,
             dueDate: parsedDueDate,
-            recurrence: parsedRecurrence
+            recurrence: parsedRecurrence,
+            location: parsedLocation
         )
 
         return ManageResponse(reminder: reminder, message: "Reminder created", parsed: parsedMetadata)
@@ -673,6 +739,7 @@ public class RemindersMCPServer {
 
         var metadataRecurrencePattern: String?
         var parsedRecurrence: ParsedField?
+        var parsedLocation: ParsedField?
 
         if let title = payload.title {
             let metadata = TitleParser.parse(title)
@@ -729,8 +796,18 @@ public class RemindersMCPServer {
             }
         }
 
+        let locationResult = try applyLocationInstruction(payload.location, to: reminder)
+        if locationResult.changed {
+            parsedLocation = locationResult.parsedField
+        }
+
         try reminders.updateReminder(reminder)
-        let parsedMetadata = parsedRecurrence.map { ParsedMetadata(recurrence: $0) }
+        let parsedMetadata: ParsedMetadata?
+        if parsedRecurrence != nil || parsedLocation != nil {
+            parsedMetadata = ParsedMetadata(recurrence: parsedRecurrence, location: parsedLocation)
+        } else {
+            parsedMetadata = nil
+        }
         return ManageResponse(reminder: reminder, message: "Reminder updated", parsed: parsedMetadata)
     }
 
@@ -1193,6 +1270,61 @@ public class RemindersMCPServer {
         return nil
     }
 
+    // MARK: - Location Helpers
+
+    private func applyLocationInstruction(_ payload: LocationAlarmPayload?, to reminder: EKReminder) throws -> (changed: Bool, parsedField: ParsedField?) {
+        guard let payload = payload else {
+            return (false, nil)
+        }
+
+        let currentAlarms = reminder.alarms ?? []
+
+        if payload.remove == true {
+            let filtered = currentAlarms.filter { $0.structuredLocation == nil }
+            if filtered.count == currentAlarms.count {
+                return (false, nil)
+            }
+            reminder.alarms = filtered.isEmpty ? nil : filtered
+            return (true, ParsedField(original: "~location remove", parsed: "Location alarm removed"))
+        }
+
+        let structuredLocation = EKStructuredLocation(title: payload.title)
+        structuredLocation.geoLocation = CLLocation(latitude: payload.latitude, longitude: payload.longitude)
+        if let radius = payload.radius, radius > 0 {
+            structuredLocation.radius = radius
+        }
+
+        var filteredAlarms = currentAlarms.filter { $0.structuredLocation == nil }
+        let alarm = EKAlarm()
+        alarm.structuredLocation = structuredLocation
+        alarm.proximity = mapProximity(payload.proximity)
+        filteredAlarms.append(alarm)
+        reminder.alarms = filteredAlarms
+
+        if let note = payload.note, !note.isEmpty {
+            if let current = reminder.notes, !current.isEmpty {
+                reminder.notes = "\(current)\n\n\(note)"
+            } else {
+                reminder.notes = note
+            }
+        }
+
+        let coords = String(format: "%.4f, %.4f", payload.latitude, payload.longitude)
+        let parsed = ParsedField(original: "@location", parsed: "\(payload.title) (\(coords))")
+        return (true, parsed)
+    }
+
+    private func mapProximity(_ value: AlarmProximity?) -> EKAlarmProximity {
+        switch value {
+        case .some(.arrival), .none:
+            return .enter
+        case .some(.departure):
+            return .leave
+        case .some(.any):
+            return .none
+        }
+    }
+
     private static let recurrenceRemovalKeywords: Set<String> = ["none", "remove", "clear", "never"]
     private static let everyRegex = try! NSRegularExpression(pattern: #"every\s+(\d+)\s+(day|days|week|weeks|month|months|year|years)"#, options: [])
     private static let dayOfMonthRegex = try! NSRegularExpression(pattern: #"on\s+(?:the\s+)?(\d{1,2})"#, options: [])
@@ -1242,50 +1374,245 @@ public class RemindersMCPServer {
         return ListsResponse(lists: [calendar], message: message)
     }
 
-    private func performOverviewAnalysis() async throws -> AnalyzeResponse {
-        let calendars = reminders.getCalendars()
-        let allReminders = try await fetchReminders(on: calendars, display: .all)
+    // MARK: - Analyze Helpers
 
-        let completedCount = allReminders.filter { $0.isCompleted }.count
-        let incompleteCount = allReminders.count - completedCount
-        let overdueCount = allReminders.filter { reminder in
-            guard let dueDate = reminder.dueDateComponents?.date else { return false }
-            return dueDate < Date() && !reminder.isCompleted
-        }.count
+    private func buildOverviewAnalysis(reminders: [EKReminder], windowDays: Int) -> AnalyzeResponse {
+        AnalyzeResponse(
+            mode: .overview,
+            summary: summarizeReminders(reminders, windowDays: windowDays),
+            lists: buildListBreakdown(reminders),
+            priorities: buildPriorityBreakdown(reminders),
+            dueWindows: nil,
+            recurrence: nil
+        )
+    }
 
-        let today = calendar.startOfDay(for: Date())
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
-        let nextWeek = calendar.date(byAdding: .day, value: 7, to: today)!
+    private func buildListAnalysis(reminders: [EKReminder], windowDays: Int) -> AnalyzeResponse {
+        AnalyzeResponse(
+            mode: .lists,
+            summary: summarizeReminders(reminders, windowDays: windowDays),
+            lists: buildListBreakdown(reminders),
+            priorities: nil,
+            dueWindows: nil,
+            recurrence: nil
+        )
+    }
 
-        let dueTodayCount = allReminders.filter { reminder in
-            guard let dueDate = reminder.dueDateComponents?.date else { return false }
-            return dueDate >= today && dueDate < tomorrow && !reminder.isCompleted
-        }.count
+    private func buildPriorityAnalysis(reminders: [EKReminder], windowDays: Int) -> AnalyzeResponse {
+        AnalyzeResponse(
+            mode: .priority,
+            summary: summarizeReminders(reminders, windowDays: windowDays),
+            lists: nil,
+            priorities: buildPriorityBreakdown(reminders),
+            dueWindows: nil,
+            recurrence: nil
+        )
+    }
 
-        let dueThisWeekCount = allReminders.filter { reminder in
-            guard let dueDate = reminder.dueDateComponents?.date else { return false }
-            return dueDate >= today && dueDate < nextWeek && !reminder.isCompleted
-        }.count
+    private func buildDueWindowAnalysis(reminders: [EKReminder], windowDays: Int) -> AnalyzeResponse {
+        AnalyzeResponse(
+            mode: .dueWindows,
+            summary: summarizeReminders(reminders, windowDays: windowDays),
+            lists: nil,
+            priorities: nil,
+            dueWindows: buildDueWindowBreakdown(reminders, windowDays: windowDays),
+            recurrence: nil
+        )
+    }
 
-        var byPriority: [String: Int] = [:]
-        var byList: [String: Int] = [:]
+    private func buildRecurrenceAnalysis(reminders: [EKReminder], windowDays: Int) -> AnalyzeResponse {
+        AnalyzeResponse(
+            mode: .recurrence,
+            summary: summarizeReminders(reminders, windowDays: windowDays),
+            lists: nil,
+            priorities: nil,
+            dueWindows: nil,
+            recurrence: buildRecurrenceStats(reminders)
+        )
+    }
 
-        for reminder in allReminders {
-            let bucket = priorityBucket(for: reminder)
-            byPriority[bucket, default: 0] += 1
-            byList[reminder.calendar.title, default: 0] += 1
+    private func summarizeReminders(_ reminders: [EKReminder], windowDays: Int) -> AnalyzeSummary {
+        let clamp = max(1, min(30, windowDays))
+        let startOfDay = calendar.startOfDay(for: Date())
+        let todayEnd = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
+        let windowEnd = calendar.date(byAdding: .day, value: clamp, to: startOfDay)!
+
+        var completed = 0
+        var overdue = 0
+        var dueToday = 0
+        var dueWithin = 0
+
+        for reminder in reminders {
+            if reminder.isCompleted {
+                completed += 1
+            }
+
+            guard let dueDate = reminder.dueDateComponents?.date else { continue }
+
+            if dueDate < startOfDay && !reminder.isCompleted {
+                overdue += 1
+            }
+
+            if dueDate >= startOfDay && dueDate < todayEnd && !reminder.isCompleted {
+                dueToday += 1
+            }
+
+            if dueDate >= startOfDay && dueDate < windowEnd && !reminder.isCompleted {
+                dueWithin += 1
+            }
         }
 
-        return AnalyzeResponse(
-            totalReminders: allReminders.count,
-            completedCount: completedCount,
-            incompleteCount: incompleteCount,
-            overdueCount: overdueCount,
-            dueTodayCount: dueTodayCount,
-            dueThisWeekCount: dueThisWeekCount,
-            byPriority: byPriority,
-            byList: byList
+        return AnalyzeSummary(
+            total: reminders.count,
+            completed: completed,
+            incomplete: reminders.count - completed,
+            overdue: overdue,
+            dueToday: dueToday,
+            dueWithinWindow: dueWithin,
+            upcomingWindowDays: clamp
         )
+    }
+
+    private func buildListBreakdown(_ reminders: [EKReminder]) -> [AnalyzeListBreakdown] {
+        var temp: [String: (total: Int, completed: Int, overdue: Int, recurring: Int)] = [:]
+        let now = Date()
+
+        for reminder in reminders {
+            var bucket = temp[reminder.calendar.title] ?? (0, 0, 0, 0)
+            bucket.total += 1
+            if reminder.isCompleted {
+                bucket.completed += 1
+            }
+            if isReminderOverdue(reminder, referenceDate: now) {
+                bucket.overdue += 1
+            }
+            if isRecurring(reminder) {
+                bucket.recurring += 1
+            }
+            temp[reminder.calendar.title] = bucket
+        }
+
+        return temp
+            .map { key, value in
+                AnalyzeListBreakdown(
+                    list: key,
+                    total: value.total,
+                    completed: value.completed,
+                    overdue: value.overdue,
+                    recurring: value.recurring
+                )
+            }
+            .sorted { $0.total > $1.total }
+    }
+
+    private func buildPriorityBreakdown(_ reminders: [EKReminder]) -> [AnalyzePriorityBreakdown] {
+        var temp: [String: (total: Int, completed: Int, overdue: Int)] = [:]
+        let now = Date()
+
+        for reminder in reminders {
+            let bucketName = priorityBucket(for: reminder)
+            var bucket = temp[bucketName] ?? (0, 0, 0)
+            bucket.total += 1
+            if reminder.isCompleted {
+                bucket.completed += 1
+            }
+            if isReminderOverdue(reminder, referenceDate: now) {
+                bucket.overdue += 1
+            }
+            temp[bucketName] = bucket
+        }
+
+        return temp
+            .map { key, value in
+                AnalyzePriorityBreakdown(
+                    priority: key,
+                    total: value.total,
+                    completed: value.completed,
+                    overdue: value.overdue
+                )
+            }
+            .sorted { $0.priority < $1.priority }
+    }
+
+    private func buildDueWindowBreakdown(_ reminders: [EKReminder], windowDays: Int) -> [AnalyzeDueWindow] {
+        let clamp = max(1, min(30, windowDays))
+        let startOfDay = calendar.startOfDay(for: Date())
+        let todayEnd = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
+        let windowEnd = calendar.date(byAdding: .day, value: clamp, to: startOfDay)!
+
+        var counts: [String: Int] = [
+            "overdue": 0,
+            "today": 0,
+            "next": 0,
+            "later": 0,
+            "unscheduled": 0
+        ]
+
+        for reminder in reminders where !reminder.isCompleted {
+            guard let dueDate = reminder.dueDateComponents?.date else {
+                counts["unscheduled", default: 0] += 1
+                continue
+            }
+
+            if dueDate < startOfDay {
+                counts["overdue", default: 0] += 1
+            } else if dueDate < todayEnd {
+                counts["today", default: 0] += 1
+            } else if dueDate < windowEnd {
+                counts["next", default: 0] += 1
+            } else {
+                counts["later", default: 0] += 1
+            }
+        }
+
+        let upcomingLabel = clamp == 1 ? "Next day" : "Next \(clamp) days"
+
+        return [
+            AnalyzeDueWindow(label: "Overdue", count: counts["overdue", default: 0]),
+            AnalyzeDueWindow(label: "Today", count: counts["today", default: 0]),
+            AnalyzeDueWindow(label: upcomingLabel, count: counts["next", default: 0]),
+            AnalyzeDueWindow(label: "Later", count: counts["later", default: 0]),
+            AnalyzeDueWindow(label: "Unscheduled", count: counts["unscheduled", default: 0])
+        ]
+    }
+
+    private func buildRecurrenceStats(_ reminders: [EKReminder]) -> AnalyzeRecurrenceStats {
+        var recurring = 0
+        var frequencyCounts: [String: Int] = [:]
+
+        for reminder in reminders {
+            guard let frequency = reminder.recurrenceRules?.first?.frequency else { continue }
+            recurring += 1
+            let key = frequencyDisplayName(frequency)
+            frequencyCounts[key, default: 0] += 1
+        }
+
+        return AnalyzeRecurrenceStats(
+            recurring: recurring,
+            nonRecurring: reminders.count - recurring,
+            byFrequency: frequencyCounts
+        )
+    }
+
+    private func isReminderOverdue(_ reminder: EKReminder, referenceDate: Date) -> Bool {
+        guard !reminder.isCompleted, let dueDate = reminder.dueDateComponents?.date else {
+            return false
+        }
+        return dueDate < referenceDate
+    }
+
+    private func isRecurring(_ reminder: EKReminder) -> Bool {
+        !(reminder.recurrenceRules?.isEmpty ?? true)
+    }
+
+    private func frequencyDisplayName(_ frequency: EKRecurrenceFrequency) -> String {
+        switch frequency {
+        case .daily: return "daily"
+        case .weekly: return "weekly"
+        case .monthly: return "monthly"
+        case .yearly: return "yearly"
+        @unknown default: return "custom"
+        }
     }
 
     // MARK: - Bulk Helpers

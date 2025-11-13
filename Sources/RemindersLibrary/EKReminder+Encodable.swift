@@ -1,5 +1,6 @@
 import EventKit
 import Foundation
+import CoreLocation
 
 /// Structured date format for API responses
 private struct FormattedDate: Encodable {
@@ -96,6 +97,21 @@ private struct EncodedRecurrence: Encodable {
     let summary: String
 }
 
+private struct EncodedAlarmLocation: Encodable {
+    let title: String
+    let latitude: Double?
+    let longitude: Double?
+    let radius: Double?
+}
+
+private struct EncodedAlarm: Encodable {
+    let kind: String
+    let absoluteDate: FormattedDate?
+    let relativeOffsetMinutes: Double?
+    let location: EncodedAlarmLocation?
+    let proximity: String?
+}
+
 extension EKCalendar: @retroactive Encodable {
     private enum CalendarEncodingKeys: String, CodingKey {
         case title
@@ -141,6 +157,7 @@ extension EKReminder: @retroactive Encodable {
         case mailUrl
         case parentId
         case isSubtask
+        case alarms
         case recurrence
     }
 
@@ -217,6 +234,10 @@ extension EKReminder: @retroactive Encodable {
         if let rule = self.recurrenceRules?.first,
            let recurrence = buildRecurrenceDescription(from: rule) {
             try container.encode(recurrence, forKey: .recurrence)
+        }
+
+        if let alarms = encodeAlarms(self.alarms), !alarms.isEmpty {
+            try container.encode(alarms, forKey: .alarms)
         }
 
         if let lastModifiedDate = self.lastModifiedDate {
@@ -337,5 +358,64 @@ extension EKReminder: @retroactive Encodable {
         }
 
         return parts.joined(separator: ", ")
+    }
+
+    private func encodeAlarms(_ alarms: [EKAlarm]?) -> [EncodedAlarm]? {
+        guard let alarms, !alarms.isEmpty else { return nil }
+        var encoded: [EncodedAlarm] = []
+        for alarm in alarms {
+            if let structured = alarm.structuredLocation {
+                let geo = structured.geoLocation
+                let location = EncodedAlarmLocation(
+                    title: structured.title ?? "",
+                    latitude: geo?.coordinate.latitude,
+                    longitude: geo?.coordinate.longitude,
+                    radius: structured.radius
+                )
+                encoded.append(
+                    EncodedAlarm(
+                        kind: "location",
+                        absoluteDate: nil,
+                        relativeOffsetMinutes: nil,
+                        location: location,
+                        proximity: encodeProximity(alarm.proximity)
+                    )
+                )
+            } else if let absolute = alarm.absoluteDate, let formatted = FormattedDate(from: absolute) {
+                encoded.append(
+                    EncodedAlarm(
+                        kind: "time",
+                        absoluteDate: formatted,
+                        relativeOffsetMinutes: nil,
+                        location: nil,
+                        proximity: nil
+                    )
+                )
+            } else if alarm.relativeOffset != 0 {
+                encoded.append(
+                    EncodedAlarm(
+                        kind: "time",
+                        absoluteDate: nil,
+                        relativeOffsetMinutes: alarm.relativeOffset / 60.0,
+                        location: nil,
+                        proximity: nil
+                    )
+                )
+            }
+        }
+        return encoded.isEmpty ? nil : encoded
+    }
+
+    private func encodeProximity(_ value: EKAlarmProximity) -> String? {
+        switch value {
+        case .enter:
+            return "arrival"
+        case .leave:
+            return "departure"
+        case .none:
+            return "any"
+        @unknown default:
+            return nil
+        }
     }
 }

@@ -37,7 +37,7 @@ Authentication follows the same token rules as the REST endpoints.
 | `reminders_bulk` | Batch mutations for many UUIDs with optional dry-run |
 | `reminders_search` | Logic tree search with grouping, sorting, pagination |
 | `reminders_lists` | List discovery/creation/deletion/archive helpers |
-| `reminders_analyze` | Overview statistics (totals, overdue counts, per-priority/list breakdowns) |
+| `reminders_analyze` | Dashboard statistics (overview, lists, priority, due windows, recurrence) |
 
 Each tool takes a single `request` object. SwiftMCP advertises the full schema, and the examples below are the canonical reference.
 
@@ -59,6 +59,13 @@ Each tool takes a single `request` object. SwiftMCP advertises the full schema, 
         "frequency": "weekly",
         "daysOfWeek": ["monday"],
         "end": { "type": "count", "value": "8" }
+      },
+      "location": {
+        "title": "HQ Office",
+        "latitude": 37.3317,
+        "longitude": -122.0301,
+        "radius": 75,
+        "proximity": "arrival"
       }
     }
   }
@@ -69,9 +76,9 @@ Supported payload keys match the `ManageRequest` schema:
 
 | Action | Payload |
 |--------|---------|
-| `create` | `create { title, list?, notes?, dueDate?, priority?, recurrence? }` |
+| `create` | `create { title, list?, notes?, dueDate?, priority?, recurrence?, location? }` |
 | `read` | `read { uuid }` |
-| `update` | `update { uuid, title?, notes?, dueDate?, priority?, isCompleted? }` |
+| `update` | `update { uuid, title?, notes?, dueDate?, priority?, isCompleted?, recurrence?, location? }` |
 | `delete` / `complete` / `uncomplete` | `{ uuid }` |
 | `move` | `move { uuid, targetList }` |
 | `archive` | `archive { uuid, archiveList?, createIfMissing?, source? }` |
@@ -94,6 +101,16 @@ Shorthand markers (`~weekly`, `~every 2 weeks`, `~monthly on 15`, `~daily for 10
 
 Clear a rule by sending `{ "recurrence": { "remove": true } }` or by including `~none` / `~remove` in the title.
 
+### Location alarms
+
+Add a geofence trigger by providing a `location` block with `title`, `latitude`, `longitude`, optional `radius` (meters), and `proximity` (`arrival`, `departure`, `any`). Remove it with `{ "location": { "remove": true } }`. EventKit only supports one structured location alarm per reminder.
+
+### Limitations
+
+- The `url`/attachment fields are read-only at the OS level.
+- Only a single structured location alarm is supported per reminder.
+- Subtasks are discoverable via `isSubtask`/`parentId` but cannot yet be created in a single call.
+
 **Response snippet**
 
 ```jsonc
@@ -106,6 +123,18 @@ Clear a rule by sending `{ "recurrence": { "remove": true } }` or by including `
     "dueDate": "2025-01-17T17:00:00-08:00",
     "tags": ["Travel"],
     "_priorityValue": 3,
+    "alarms": [
+      {
+        "kind": "location",
+        "location": {
+          "title": "HQ Office",
+          "latitude": 37.3317,
+          "longitude": -122.0301,
+          "radius": 75
+        },
+        "proximity": "arrival"
+      }
+    ],
     "recurrence": {
       "frequency": "weekly",
       "interval": 1,
@@ -150,9 +179,13 @@ Clear a rule by sending `{ "recurrence": { "remove": true } }` or by including `
 
 The response contains `processedCount`, `failedCount`, `errors`, and a per-item result array with change logs.
 
+**Limitations:** bulk operations intentionally ignore attachments, subtasks, structured location alarms, and the OS-managed `url` field.
+
 ## 5. reminders_search
 
 **Use when:** you need to query reminders with complex logic, grouping, or sorting. The request accepts either the structured `logic` tree or the shorter SQL-like `filter` string documented in [`filter-syntax.md`](filter-syntax.md).
+
+> Parentheses in the SQL-like `filter` string are not supported yet—use the `logic` object when you need nested AND/OR groupings.
 
 ```jsonc
 {
@@ -216,46 +249,56 @@ Actions:
 
 ## 7. reminders_analyze
 
-**Use when:** you need aggregate statistics without enumerating reminders.
+**Use when:** you need aggregate statistics without enumerating reminders. Modes:
+
+| Mode | What you get |
+|------|--------------|
+| `overview` (default) | Summary + list and priority breakdowns |
+| `lists` | Per-list totals, completion, overdue, recurring counts |
+| `priority` | Priority histogram with completion/overdue counts |
+| `dueWindows` | Buckets: overdue, today, next _N_ days, later, unscheduled |
+| `recurrence` | Recurring vs one-off distribution (grouped by frequency) |
+
+Optional `upcomingWindowDays` (1–30, default 7) controls how “due soon” is calculated for the summary and due-window buckets.
 
 ```jsonc
 {
-  "request": { "mode": "overview" }
+  "request": {
+    "mode": "dueWindows",
+    "upcomingWindowDays": 10
+  }
 }
 ```
 
-Sample response:
+Sample response (`mode: dueWindows`):
 
 ```jsonc
 {
+  "mode": "dueWindows",
   "summary": {
     "total": 246,
     "completed": 120,
     "incomplete": 126,
     "overdue": 14,
     "dueToday": 6,
-    "dueThisWeek": 22
+    "dueWithinWindow": 22,
+    "upcomingWindowDays": 10
   },
-  "byPriority": {
-    "high": 8,
-    "medium": 41,
-    "low": 77,
-    "none": 120
-  },
-  "byList": [
-    { "list": "One - Quick", "count": 34 },
-    { "list": "Inbox", "count": 18 }
+  "dueWindows": [
+    { "label": "Overdue", "count": 14 },
+    { "label": "Today", "count": 6 },
+    { "label": "Next 10 days", "count": 22 },
+    { "label": "Later", "count": 41 },
+    { "label": "Unscheduled", "count": 43 }
   ]
 }
 ```
-
-More modes will be added by extending the `AnalyzeRequest` enum.
 
 ## 8. Filter Language Cheat Sheet
 
 The parsed filter DSL is documented in detail in [`filter-syntax.md`](filter-syntax.md). Highlights:
 
-- Logical operators: `AND`, `OR`, `NOT`, parentheses for grouping.
+- Logical operators: `AND`, `OR`, `NOT` (use the structured `logic` tree for grouping—parentheses in the SQL-like string are not supported yet).
 - Operators: `=`, `!=`, `<`, `>`, `<=`, `>=`, `CONTAINS`, `LIKE`, `MATCHES`, `IN`, `BETWEEN`.
 - Natural dates: `today`, `tomorrow`, `now`, `friday+2`, `start of week`, `end of month`.
 - Shortcuts: `overdue`, `due_today`, `incomplete`, `high_priority`, etc.
