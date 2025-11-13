@@ -231,6 +231,21 @@ public class RemindersMCPServer {
     /// - Use `lists_list` to discover valid list identifiers before move/archive.
     /// - `dueDate` accepts ISO8601 or natural language strings (`"tomorrow 5pm"`).
     /// - `priority` accepts `high|medium|low|none` or numeric `0-9`.
+    ///
+    /// ### Example
+    /// ```json
+    /// {
+    ///   "request": {
+    ///     "action": "create",
+    ///     "create": {
+    ///       "title": "Book flights",
+    ///       "list": "Travel",
+    ///       "dueDate": "next friday 17:00",
+    ///       "priority": "high"
+    ///     }
+    ///   }
+    /// }
+    /// ```
     @MCPTool
     public func reminders_manage(_ request: ManageRequest) async throws -> ManageResponse {
         switch request.action {
@@ -288,9 +303,12 @@ public class RemindersMCPServer {
     /// ### Example
     /// ```json
     /// {
-    ///   "action": "complete",
-    ///   "uuids": ["UUID-1", "UUID-2"],
-    ///   "dryRun": true
+    ///   "request": {
+    ///     "action": "move",
+    ///     "uuids": ["UUID-1", "UUID-2"],
+    ///     "fields": { "targetList": "Archive" },
+    ///     "dryRun": true
+    ///   }
     /// }
     /// ```
     ///
@@ -349,17 +367,24 @@ public class RemindersMCPServer {
     /// ### Example payload
     /// ```json
     /// {
-    ///   "logic": {
-    ///     "all": [
-    ///       { "clause": { "field": "priority", "op": "in", "value": ["high","medium"] } },
-    ///       { "clause": { "field": "list", "op": "equals", "value": "Work" } },
-    ///       { "clause": { "field": "dueDate", "op": "lessOrEqual", "value": "end of week" } }
-    ///     ]
-    ///   },
-    ///   "sort": [{ "field": "dueDate", "direction": "asc" }],
-    ///   "pagination": { "limit": 25 }
+    ///   "request": {
+    ///     "logic": {
+    ///       "all": [
+    ///         { "clause": { "field": "priority", "op": "in", "value": ["high","medium"] } },
+    ///         { "clause": { "field": "list", "op": "equals", "value": "Work" } },
+    ///         { "clause": { "field": "dueDate", "op": "lessOrEqual", "value": "end of week" } }
+    ///       ]
+    ///     },
+    ///     "sort": [{ "field": "dueDate", "direction": "asc" }],
+    ///     "pagination": { "limit": 25 }
+    ///   }
     /// }
     /// ```
+    ///
+    /// ### Sample response fields
+    /// - `reminders[n].uuid`, `title`, `list`, `priority`, `dueDate`
+    /// - `totalCount`: total before pagination
+    /// - `groups`: optional aggregation results keyed by `field`
     ///
     /// ### Request tips
     /// - `logic`: structured filtering (preferred over ad-hoc parsing).
@@ -434,6 +459,11 @@ public class RemindersMCPServer {
     /// - `delete`: `{ "identifier": "<list name or UUID>" }`.
     /// - `ensureArchive`: `{ "name": "Archive", "createIfMissing": true }`.
     ///
+    /// ### Example
+    /// ```json
+    /// { "request": { "action": "create", "create": { "name": "Projects", "source": "iCloud" } } }
+    /// ```
+    ///
     /// Use `list` results to drive other tools (eg. `move`, `archive`) so you always pass valid identifiers.
     @MCPTool
     public func reminders_lists(_ request: ListsRequest) async throws -> ListsResponse {
@@ -469,6 +499,30 @@ public class RemindersMCPServer {
     /// - completed vs incomplete
     /// - overdue, due today, due this week
     /// - per-priority and per-list distribution
+    ///
+    /// ### Example request
+    /// ```json
+    /// { "request": { "mode": "overview" } }
+    /// ```
+    ///
+    /// ### Example response
+    /// ```json
+    /// {
+    ///   "summary": {
+    ///     "total": 246,
+    ///     "completed": 120,
+    ///     "incomplete": 126,
+    ///     "overdue": 14,
+    ///     "dueToday": 6,
+    ///     "dueThisWeek": 22
+    ///   },
+    ///   "byPriority": { "high": 8, "medium": 41, "low": 77, "none": 120 },
+    ///   "byList": [
+    ///     { "list": "One - Quick", "count": 34 },
+    ///     { "list": "Inbox", "count": 18 }
+    ///   ]
+    /// }
+    /// ```
     ///
     /// Future modes can expand the `AnalyzeRequest` enum; for now send `{ "mode": "overview" }` or omit the body.
     @MCPTool
