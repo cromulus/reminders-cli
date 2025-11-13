@@ -34,6 +34,21 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Usage helper
+usage() {
+    cat <<'EOF'
+Usage: ./install-service.sh [options]
+
+Options:
+  --token <value>     Use the provided API token instead of generating a new one.
+  --reuse-token       Reuse the token from an existing LaunchAgent plist (if present).
+  -h, --help          Show this help message.
+
+By default a fresh token is generated each run. Supplying --token overrides all other token behavior,
+and --reuse-token falls back to generating a new token if none can be read.
+EOF
+}
+
 # Function to generate a secure token
 generate_token() {
     if command_exists openssl; then
@@ -52,6 +67,41 @@ get_user_info() {
     USER_HOME=$(eval echo ~$CURRENT_USER)
     echo "$CURRENT_USER|$USER_HOME"
 }
+
+extract_existing_token() {
+    local plist_path="$1"
+    [[ -f "$plist_path" ]] || return 1
+
+    if ! command_exists plutil || ! command_exists python3; then
+        return 1
+    fi
+
+    local token
+    token=$(plutil -extract ProgramArguments json -o - "$plist_path" 2>/dev/null | python3 - <<'PY'
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+for idx, value in enumerate(data):
+    if value == "--token" and idx + 1 < len(data):
+        print(data[idx + 1])
+        sys.exit(0)
+sys.exit(1)
+PY
+) || return 1
+
+    if [[ -n "$token" ]]; then
+        echo "$token"
+        return 0
+    fi
+
+    return 1
+}
+
+# CLI options
+USER_SUPPLIED_TOKEN=""
+REUSE_TOKEN=false
 
 # Function to find reminders-api binary
 find_reminders_api() {
@@ -124,9 +174,32 @@ main() {
     REMINDERS_API_PATH=$(realpath "$REMINDERS_API_PATH")
     print_success "Found reminders-api at: $REMINDERS_API_PATH"
     
-    # Generate API token
-    API_TOKEN=$(generate_token)
-    print_success "Generated API token: $API_TOKEN"
+    # Determine plist path
+    PLIST_FILE="$LAUNCH_AGENTS_DIR/com.billcromie.reminders-cli.api.plist"
+
+    if $REUSE_TOKEN && [[ ! -f "$PLIST_FILE" ]]; then
+        print_warning "--reuse-token was specified but no existing LaunchAgent plist was found; generating a new token."
+    fi
+
+    # Generate or reuse API token
+    local token_source=""
+    if [[ -n "$USER_SUPPLIED_TOKEN" ]]; then
+        API_TOKEN="$USER_SUPPLIED_TOKEN"
+        token_source="provided via --token"
+    elif $REUSE_TOKEN && [[ -f "$PLIST_FILE" ]]; then
+        if API_TOKEN=$(extract_existing_token "$PLIST_FILE"); then
+            token_source="reused token from existing plist"
+        else
+            print_warning "Unable to extract token from existing plist; generating a new one."
+        fi
+    fi
+
+    if [[ -z "$API_TOKEN" ]]; then
+        API_TOKEN=$(generate_token)
+        token_source="generated new token"
+    fi
+
+    print_success "API token (${token_source}): $API_TOKEN"
     
     # Create logs directory
     LOGS_DIR="$USER_HOME/Library/Logs/reminders-api"
@@ -136,9 +209,6 @@ main() {
     # Create LaunchAgents directory if it doesn't exist
     LAUNCH_AGENTS_DIR="$USER_HOME/Library/LaunchAgents"
     mkdir -p "$LAUNCH_AGENTS_DIR"
-    
-    # Create the plist file
-    PLIST_FILE="$LAUNCH_AGENTS_DIR/com.billcromie.reminders-cli.api.plist"
     
     # Generate plist content with proper TCC configuration
     cat > "$PLIST_FILE" << EOF
@@ -288,6 +358,34 @@ EOF
     print_warning "IMPORTANT: You may need to grant Reminders access when the service first starts."
     print_warning "Check the logs if you encounter permission issues."
 }
+
+# Parse command-line options
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --token)
+            shift
+            if [[ -z "$1" ]]; then
+                print_error "--token requires a value"
+                usage
+                exit 1
+            fi
+            USER_SUPPLIED_TOKEN="$1"
+            ;;
+        --reuse-token)
+            REUSE_TOKEN=true
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            print_error "Unknown option: $1"
+            usage
+            exit 1
+            ;;
+    esac
+    shift
+done
 
 # Check if running as root
 if [[ $EUID -eq 0 ]]; then
