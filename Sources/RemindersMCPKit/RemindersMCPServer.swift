@@ -365,57 +365,7 @@ public class RemindersMCPServer {
 
     // MARK: - Consolidated MCP Tools
 
-    /// Unified single-reminder CRUD/complete/archive/move/archive tool with natural-language parsing.
-    ///
-    /// **When to use:** create/read/update/delete an individual reminder, complete/uncomplete, move between lists, or archive (with auto archive creation). Accepts natural-language titles such as `“Send report tomorrow 9am @Finance ^high”`.
-    ///
-    /// ### Supported actions
-    /// | Action | Payload |
-    /// |--------|---------|
-    /// | `create` | `create { title, list?, notes?, dueDate?, priority? }` |
-    /// | `read` | `read { uuid }` |
-    /// | `update` | `update { uuid, title?, notes?, dueDate?, priority?, isCompleted? }` |
-    /// | `delete` / `complete` / `uncomplete` | `{ uuid }` |
-    /// | `move` | `move { uuid, targetList }` |
-    /// | `archive` | `archive { uuid, archiveList?, createIfMissing?, source? }` |
-    ///
-    /// Recurrence:
-    /// - Structured: `recurrence { "frequency": "weekly", "interval": 1, "daysOfWeek": ["monday"] }`
-    /// - Natural shorthand: append `~weekly`, `~every 2 weeks`, `~monthly on 15`, `~daily for 10`
-    ///
-    /// **Limitations:** Apple’s EventKit does not let us set attachments or the `url` field, and only one structured location alarm is supported per reminder.
-    ///
-    /// ### Sample prompts
-    /// - “Create ‘Prep slides tomorrow 10am @Work ^high ~weekly on Mondays’ and move it to ‘Projects’.”
-    /// - “Archive reminder `UUID-123` into the Archive list (create if missing).”
-    ///
-    /// ### Sample JSON
-    /// ```json
-    /// {
-    ///   "request": {
-    ///     "action": "create",
-    ///     "create": {
-    ///       "title": "Book flights tomorrow 9am @Travel ^high",
-    ///       "list": "Travel",
-    ///       "notes": "Use miles for SFO→JFK",
-    ///       "dueDate": "next friday 17:00",
-    ///       "priority": "high",
-    ///       "recurrence": {
-    ///         "frequency": "weekly",
-    ///         "daysOfWeek": ["monday"],
-    ///         "end": { "type": "count", "value": "8" }
-    ///       },
-    ///       "location": {
-    ///         "title": "HQ Office",
-    ///         "latitude": 37.3317,
-    ///         "longitude": -122.0301,
-    ///         "radius": 75,
-    ///         "proximity": "arrival"
-    ///       }
-    ///     }
-    ///   }
-    /// }
-    /// ```
+    /// Single reminder CRUD and workflow tool. Supports create, read, update, delete, complete, uncomplete, move, and archive actions plus natural-language parsing (examples like Send report tomorrow 9am @Finance ^high). Structured recurrence and shorthand markers (~weekly, ~monthly, etc.) are both accepted. Apple’s EventKit still prevents us from writing attachments or the URL field and only one structured location alarm is possible.
     @MCPTool
     public func reminders_manage(_ request: ManageRequest) async throws -> ManageResponse {
         switch request.action {
@@ -462,38 +412,7 @@ public class RemindersMCPServer {
         }
     }
 
-    /// Batch reminder operations with optional dry-run reporting.
-    ///
-    /// **When to use:** run the same mutation over many reminders (complete all overdue items, move a batch to another list, archive multiple UUIDs). Supports dry runs so you can check results before committing.
-    ///
-    /// | Action | Notes |
-    /// |--------|-------|
-    /// | `update` | `fields` may include `title`, `notes`, `dueDate`, `priority`, `isCompleted` |
-    /// | `complete`, `uncomplete`, `delete` | only `uuids` required |
-    /// | `move` | include `fields.targetList` |
-    /// | `archive` | include `fields.archiveList?`, `fields.createArchiveIfMissing?` |
-    ///
-    /// ### Sample prompt
-    /// “Archive every reminder returned by my last search, dry-run first, then apply if no errors.”
-    ///
-    /// ### Sample JSON
-    /// ```json
-    /// {
-    ///   "request": {
-    ///     "action": "move",
-    ///     "uuids": ["UUID-1", "UUID-2"],
-    ///     "fields": {
-    ///       "targetList": "Archive",
-    ///       "createArchiveIfMissing": true
-    ///     },
-    ///     "dryRun": true
-    ///   }
-    /// }
-    /// ```
-    ///
-    /// Dry-runs report what *would* change without mutating reminders.
-    ///
-    /// **Limitations:** bulk mode intentionally ignores attachments, subtasks, and structured location alarms.
+    /// Batch reminder operations with optional dry-run reporting. Use this when one mutation should apply to many UUIDs (complete, uncomplete, delete, move, archive, or limited updates). The request supplies the action, a list of uuids, optional fields (such as targetList for moves or title/notes for updates), and an optional dryRun flag. The response includes processed counts, per-item status, and change records; dryRun mode only reports what would change. Attachments, subtasks, and structured location alarms are skipped intentionally.
     @MCPTool
     public func reminders_bulk(_ request: BulkRequest) async throws -> BulkResponse {
         guard !request.uuids.isEmpty else {
@@ -637,18 +556,7 @@ public class RemindersMCPServer {
         )
     }
 
-    /// List discovery, creation, deletion, and archive helpers.
-    ///
-    /// **When to use:** discover valid list identifiers, create/delete lists, or guarantee an Archive list exists before bulk moves.
-    ///
-    /// | Action | Example payload |
-    /// |--------|-----------------|
-    /// | `list` | `{ "request": { "action": "list", "list": { "includeReadOnly": false } } }` |
-    /// | `create` | `{ "request": { "action": "create", "create": { "name": "Projects", "source": "iCloud" } } }` |
-    /// | `delete` | `{ "request": { "action": "delete", "delete": { "identifier": "Work" } } }` |
-    /// | `ensureArchive` | `{ "request": { "action": "ensureArchive", "ensureArchive": { "name": "Archive", "createIfMissing": true } } }` |
-    ///
-    /// **Sample prompt:** “List all writable reminder lists and ensure there is an Archive list (create if needed).”
+    /// List discovery, creation, deletion, and archive helpers. Use this tool to enumerate writable lists, create a new list, delete one by identifier, or ensure an Archive list exists (optionally creating it). Each action accepts a small payload, for example action=list with includeReadOnly, action=create with name/source, action=delete with identifier, or action=ensureArchive with name/createIfMissing/source.
     @MCPTool
     public func reminders_lists(_ request: ListsRequest) async throws -> ListsResponse {
         switch request.action {
@@ -677,38 +585,7 @@ public class RemindersMCPServer {
         }
     }
 
-    /// Aggregate reminder analytics with multiple modes.
-    ///
-    /// **When to use:** you need a dashboard-style snapshot (overview), a per-list scoreboard, priority histogram, due-window buckets, or recurrence stats without iterating through individual reminders.
-    ///
-    /// Modes:
-    /// - `overview` (default) – summary + list and priority breakdowns
-    /// - `lists` – focus on list totals, overdue counts, and recurrence per list
-    /// - `priority` – priority histogram with completion/overdue counts
-    /// - `dueWindows` – buckets reminders into `overdue`, `today`, `next N days`, `later`, `unscheduled`
-    /// - `recurrence` – recurring vs one-off distribution, grouped by frequency
-    ///
-    /// **Limitations:** analytics operate on the reminders currently available on this device (no historical trend data) and do not include raw reminder payloads.
-    ///
-    /// ### Sample prompts
-    /// - “Summarize my reminders: how many overdue, due today, and the busiest lists?”
-    /// - “Give me a priority histogram so I can see how many highs vs lows remain.”
-    /// - “Show a table of lists sorted by how many overdue items they have.”
-    ///
-    /// ### Example request
-    /// ```json
-    /// {
-    ///   "request": {
-    ///     "mode": "dueWindows",
-    ///     "upcomingWindowDays": 10
-    ///   }
-    /// }
-    /// ```
-    ///
-    /// ⚠️ Requests must be JSON objects (not quoted strings). Pass `{ "request": { ... } }`
-    /// just like the other tools (do **not** wrap the payload in a string literal).
-    ///
-    /// Set `upcomingWindowDays` (1-30) to control how “due soon” windows are calculated; defaults to 7 days.
+    /// Aggregate reminder analytics with multiple modes. Choose mode=overview (default) for summary plus list and priority breakdowns, mode=lists for per-list totals, mode=priority for a histogram, mode=dueWindows for overdue/today/soon/later buckets, or mode=recurrence for recurring vs one-off counts. Optional upcomingWindowDays (1-30, default 7) controls how due-window buckets are calculated. Responses provide dashboard-style totals without listing raw reminders.
     @MCPTool
     public func reminders_analyze(_ request: AnalyzeRequest? = nil) async throws -> AnalyzeResponse {
         let mode = request?.mode ?? .overview
