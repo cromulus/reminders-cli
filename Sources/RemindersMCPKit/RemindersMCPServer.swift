@@ -85,6 +85,14 @@ public struct SearchFilters: Encodable {
     }
 }
 
+private struct ListsRequestDTO: Decodable {
+    let action: ListsRequest.Action
+    let list: ListsListPayload?
+    let create: ListsCreatePayload?
+    let delete: ListsDeletePayload?
+    let ensureArchive: ListsEnsureArchivePayload?
+}
+
 public struct ListsRequest: Decodable {
     public enum Action: String, Decodable {
         case list
@@ -98,6 +106,57 @@ public struct ListsRequest: Decodable {
     public let create: ListsCreatePayload?
     public let delete: ListsDeletePayload?
     public let ensureArchive: ListsEnsureArchivePayload?
+
+    public init(
+        action: Action,
+        list: ListsListPayload? = nil,
+        create: ListsCreatePayload? = nil,
+        delete: ListsDeletePayload? = nil,
+        ensureArchive: ListsEnsureArchivePayload? = nil
+    ) {
+        self.action = action
+        self.list = list
+        self.create = create
+        self.delete = delete
+        self.ensureArchive = ensureArchive
+    }
+
+    private init(dto: ListsRequestDTO) {
+        self.init(
+            action: dto.action,
+            list: dto.list,
+            create: dto.create,
+            delete: dto.delete,
+            ensureArchive: dto.ensureArchive
+        )
+    }
+
+    public init(from decoder: Decoder) throws {
+        if let dto = try? ListsRequestDTO(from: decoder) {
+            self.init(dto: dto)
+            return
+        }
+
+        if let stringValue = try? decoder.singleValueContainer().decode(String.self),
+           !stringValue.isEmpty
+        {
+            let data = Data(stringValue.utf8)
+            let dto = try JSONDecoder().decode(ListsRequestDTO.self, from: data)
+            self.init(dto: dto)
+            return
+        }
+
+        if let container = try? decoder.container(keyedBy: DynamicCodingKey.self),
+           let requestKey = container.allKeys.first(where: { $0.stringValue == "request" })
+        {
+            let nested = try container.superDecoder(forKey: requestKey)
+            let dto = try ListsRequestDTO(from: nested)
+            self.init(dto: dto)
+            return
+        }
+
+        throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Unable to decode ListsRequest payload"))
+    }
 }
 
 public struct ListsListPayload: Decodable {
@@ -130,6 +189,47 @@ public enum AnalyzeMode: String, Codable {
 public struct AnalyzeRequest: Decodable {
     public let mode: AnalyzeMode?
     public let upcomingWindowDays: Int?
+
+    public init(mode: AnalyzeMode? = nil, upcomingWindowDays: Int? = nil) {
+        self.mode = mode
+        self.upcomingWindowDays = upcomingWindowDays
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case mode
+        case upcomingWindowDays
+    }
+
+    public init(from decoder: Decoder) throws {
+        // Normal keyed decoding
+        if let container = try? decoder.container(keyedBy: CodingKeys.self) {
+            let mode = try container.decodeIfPresent(AnalyzeMode.self, forKey: .mode)
+            let window = try container.decodeIfPresent(Int.self, forKey: .upcomingWindowDays)
+            self.init(mode: mode, upcomingWindowDays: window)
+            return
+        }
+
+        // Handle { "request": { ... } }
+        if let container = try? decoder.container(keyedBy: DynamicCodingKey.self),
+           let requestKey = container.allKeys.first(where: { $0.stringValue == "request" })
+        {
+            let nested = try container.superDecoder(forKey: requestKey)
+            self = try AnalyzeRequest(from: nested)
+            return
+        }
+
+        // Handle stringified JSON payloads
+        if let stringValue = try? decoder.singleValueContainer().decode(String.self),
+           !stringValue.isEmpty,
+           let data = stringValue.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode(AnalyzeRequest.self, from: data)
+        {
+            self = decoded
+            return
+        }
+
+        self.init()
+    }
 }
 
 public struct SearchResponse: Encodable {
@@ -597,8 +697,16 @@ public class RemindersMCPServer {
     ///
     /// ### Example request
     /// ```json
-    /// { "request": { "mode": "dueWindows", "upcomingWindowDays": 10 } }
+    /// {
+    ///   "request": {
+    ///     "mode": "dueWindows",
+    ///     "upcomingWindowDays": 10
+    ///   }
+    /// }
     /// ```
+    ///
+    /// ⚠️ Requests must be JSON objects (not quoted strings). Pass `{ "request": { ... } }`
+    /// just like the other tools (do **not** wrap the payload in a string literal).
     ///
     /// Set `upcomingWindowDays` (1-30) to control how “due soon” windows are calculated; defaults to 7 days.
     @MCPTool

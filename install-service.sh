@@ -42,6 +42,8 @@ Usage: ./install-service.sh [options]
 Options:
   --token <value>     Use the provided API token instead of generating a new one.
   --reuse-token       Reuse the token from an existing LaunchAgent plist (if present).
+  --host <value>      Host interface for reminders-api (default: 127.0.0.1).
+  --port <value>      Port for reminders-api (default: 8080).
   -h, --help          Show this help message.
 
 By default a fresh token is generated each run. Supplying --token overrides all other token behavior,
@@ -99,9 +101,11 @@ PY
     return 1
 }
 
-# CLI options
+# CLI options / defaults
 USER_SUPPLIED_TOKEN=""
 REUSE_TOKEN=false
+SERVICE_HOST="127.0.0.1"
+SERVICE_PORT="8080"
 
 # Function to find reminders-api binary
 find_reminders_api() {
@@ -174,7 +178,9 @@ main() {
     REMINDERS_API_PATH=$(realpath "$REMINDERS_API_PATH")
     print_success "Found reminders-api at: $REMINDERS_API_PATH"
     
-    # Determine plist path
+    # Create LaunchAgents directory if it doesn't exist and determine plist path
+    LAUNCH_AGENTS_DIR="$USER_HOME/Library/LaunchAgents"
+    mkdir -p "$LAUNCH_AGENTS_DIR"
     PLIST_FILE="$LAUNCH_AGENTS_DIR/com.billcromie.reminders-cli.api.plist"
 
     if $REUSE_TOKEN && [[ ! -f "$PLIST_FILE" ]]; then
@@ -206,10 +212,6 @@ main() {
     mkdir -p "$LOGS_DIR"
     print_status "Created logs directory: $LOGS_DIR"
     
-    # Create LaunchAgents directory if it doesn't exist
-    LAUNCH_AGENTS_DIR="$USER_HOME/Library/LaunchAgents"
-    mkdir -p "$LAUNCH_AGENTS_DIR"
-    
     # Generate plist content with proper TCC configuration
     cat > "$PLIST_FILE" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -227,9 +229,9 @@ main() {
         <string>--token</string>
         <string>$API_TOKEN</string>
         <string>--host</string>
-        <string>127.0.0.1</string>
+        <string>$SERVICE_HOST</string>
         <string>--port</string>
-        <string>8080</string>
+        <string>$SERVICE_PORT</string>
     </array>
 
     <!-- CRITICAL: Run in GUI session for TCC permissions -->
@@ -341,7 +343,7 @@ EOF
     echo
     echo "Service Details:"
     echo "  - Service Name: com.billcromie.reminders-cli.api"
-    echo "  - API Endpoint: http://127.0.0.1:8080"
+    echo "  - API Endpoint: http://$SERVICE_HOST:$SERVICE_PORT"
     echo "  - API Token: $API_TOKEN"
     echo "  - Logs Directory: $LOGS_DIR"
     echo
@@ -353,7 +355,7 @@ EOF
     echo "  - Restart service: launchctl bootout gui/\$(id -u) com.billcromie.reminders-cli.api && launchctl bootstrap gui/\$(id -u) $PLIST_FILE"
     echo
     echo "Test the API:"
-    echo "  curl -H \"Authorization: Bearer $API_TOKEN\" http://127.0.0.1:8080/lists"
+    echo "  curl -H \"Authorization: Bearer $API_TOKEN\" http://$SERVICE_HOST:$SERVICE_PORT/lists"
     echo
     print_warning "IMPORTANT: You may need to grant Reminders access when the service first starts."
     print_warning "Check the logs if you encounter permission issues."
@@ -373,6 +375,28 @@ while [[ $# -gt 0 ]]; do
             ;;
         --reuse-token)
             REUSE_TOKEN=true
+            ;;
+        --host)
+            shift
+            if [[ -z "$1" ]]; then
+                print_error "--host requires a value"
+                usage
+                exit 1
+            fi
+            SERVICE_HOST="$1"
+            ;;
+        --port)
+            shift
+            if [[ -z "$1" ]]; then
+                print_error "--port requires a value"
+                usage
+                exit 1
+            fi
+            if [[ ! "$1" =~ ^[0-9]+$ ]]; then
+                print_error "--port must be numeric"
+                exit 1
+            fi
+            SERVICE_PORT="$1"
             ;;
         -h|--help)
             usage

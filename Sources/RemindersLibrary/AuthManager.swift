@@ -236,6 +236,24 @@ public class AuthManager {
     }
 }
 
+public extension AuthManager {
+    /// Normalize an Authorization header or bare token into the token string.
+    static func normalizedToken(from authorizationValue: String?) -> String? {
+        guard let raw = authorizationValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else {
+            return nil
+        }
+
+        let lowercased = raw.lowercased()
+        if lowercased.hasPrefix("bearer ") && raw.count > 7 {
+            let start = raw.index(raw.startIndex, offsetBy: 7)
+            return raw[start...].trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return raw
+    }
+}
+
 // Extensions for authentication
 public extension HBRequest {
     // Property to check if a request is authenticated
@@ -294,23 +312,27 @@ public struct TokenAuthMiddleware: HBMiddleware {
             return next.respond(to: requestCopy)
         }
         
-        // Get the authorization header
-        guard let authHeader = request.headers.first(name: "Authorization") else {
+        // Get the authorization header (case-insensitive)
+        var headerValue: String?
+        for header in request.headers {
+            if header.name.compare("Authorization", options: .caseInsensitive) == .orderedSame {
+                headerValue = header.value
+                break
+            }
+        }
+        
+        guard let rawHeader = headerValue else {
             Logger.shared.warn("Request \(request.method) \(request.uri.path) - missing Authorization header")
             return request.failure(.unauthorized, message: "Authentication required")
         }
         
-        // Check if it's a Bearer token
-        let components = authHeader.split(separator: " ")
-        guard components.count == 2,
-              components[0].lowercased() == "bearer",
-              let token = components.last else {
+        guard let token = AuthManager.normalizedToken(from: rawHeader) else {
             Logger.shared.warn("Request \(request.method) \(request.uri.path) - invalid authorization format")
             return request.failure(.unauthorized, message: "Invalid authorization format")
         }
         
         // Validate the token
-        if authManager.isValidToken(String(token)) {
+        if authManager.isValidToken(token) {
             // Store authentication status in the extensions
             var requestCopy = request
             var ext = requestCopy.extensions

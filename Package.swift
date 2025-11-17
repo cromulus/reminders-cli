@@ -39,14 +39,18 @@ let package = Package(
                 "RemindersMCPKit",
                 .product(name: "SwiftMCP", package: "SwiftMCP"),
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
-                "RemindersLibrary"
+                "RemindersLibrary",
+                .product(name: "Hummingbird", package: "hummingbird"),
+                .product(name: "AsyncHTTPClient", package: "async-http-client")
             ]
         ),
         .target(
             name: "RemindersMCPKit",
             dependencies: [
                 "RemindersLibrary",
-                .product(name: "SwiftMCP", package: "SwiftMCP")
+                .product(name: "SwiftMCP", package: "SwiftMCP"),
+                .product(name: "Hummingbird", package: "hummingbird"),
+                .product(name: "AsyncHTTPClient", package: "async-http-client")
             ]
         ),
         .target(

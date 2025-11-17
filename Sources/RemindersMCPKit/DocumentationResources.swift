@@ -136,6 +136,7 @@ Per the [Model Context Protocol server tools spec (rev 2025-03-26)](https://gith
 - **Modes:** `overview` (default), `lists`, `priority`, `dueWindows`, `recurrence`.
 - **Tuning:** set `upcomingWindowDays` (1–30, default 7) to control how “due soon” is computed.
 - **Limitations:** analytics operate on the reminders currently available on this device (no historical trend data) and do not include raw reminder payloads.
+- **Format reminder:** pass a JSON object under `request` (`{ "request": { ... } }`), not a quoted string.
 
 ```jsonc
 {

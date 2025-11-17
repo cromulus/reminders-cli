@@ -4,7 +4,7 @@ import Logging
 import NIOCore
 import NIOHTTP1
 
-struct MCPProxy {
+public struct MCPProxy {
     private let prefixes: [String]
     private let baseURL: String
     private let hostHeader: String
@@ -12,7 +12,7 @@ struct MCPProxy {
     private let logger: Logger
     private let maxBodySize: Int
 
-    init(
+    public init(
         baseURL: String,
         hostHeader: String,
         serverPath: String?,
@@ -28,6 +28,7 @@ struct MCPProxy {
 
         var paths = [
             "/mcp",
+            "/mcp/sse",
             "/messages",
             "/sse",
             "/.well-known",
@@ -44,7 +45,7 @@ struct MCPProxy {
         self.prefixes = paths
     }
 
-    func shouldHandle(path: String) -> Bool {
+    public func shouldHandle(path: String) -> Bool {
         for prefix in prefixes {
             if path == prefix || path.hasPrefix(prefix.appendingSlashIfNeeded()) {
                 return true
@@ -53,12 +54,35 @@ struct MCPProxy {
         return false
     }
 
-    func forward(_ request: HBRequest) async throws -> HBResponse {
-        let targetURL = "\(baseURL)\(request.uri.string)"
+    public func forward(_ request: HBRequest) async throws -> HBResponse {
+        let upstreamPath: String
+        if request.uri.path == "/mcp/sse" {
+            if let query = request.uri.query, !query.isEmpty {
+                upstreamPath = "/mcp?\(query)"
+            } else {
+                upstreamPath = "/mcp"
+            }
+        } else {
+            upstreamPath = request.uri.string
+        }
+
+        let targetURL = "\(baseURL)\(upstreamPath)"
 
         var clientRequest = HTTPClientRequest(url: targetURL)
         clientRequest.method = request.method
         clientRequest.headers = request.headers
+
+        // Workaround: MCP Inspector (and other new clients) send the Streamable HTTP
+        // negotiation header even when they intend to use legacy SSE. SwiftMCP’s
+        // HTTPSSETransport interprets that header as the new transport and returns 500.
+        // If we detect a GET /mcp SSE stream, strip the MCP-Protocol-Version header so
+        // the backend treats it as the classic SSE flow.
+        if request.method == .GET,
+           (request.uri.path.hasPrefix("/mcp") || request.uri.path.hasPrefix("/sse")),
+           let accept = request.headers.first(name: "Accept"),
+           accept.contains("text/event-stream") {
+            clientRequest.headers.remove(name: "MCP-Protocol-Version")
+        }
         clientRequest.headers.replaceOrAdd(name: "Host", value: hostHeader)
 
         if let bodyBuffer = try await request.body.consumeBody(maxSize: maxBodySize) {
@@ -78,10 +102,14 @@ struct MCPProxy {
     }
 }
 
-struct MCPProxyMiddleware: HBMiddleware {
-    let proxy: MCPProxy
+public struct MCPProxyMiddleware: HBMiddleware {
+    public let proxy: MCPProxy
 
-    func apply(to request: HBRequest, next: HBResponder) -> EventLoopFuture<HBResponse> {
+    public init(proxy: MCPProxy) {
+        self.proxy = proxy
+    }
+
+    public func apply(to request: HBRequest, next: HBResponder) -> EventLoopFuture<HBResponse> {
         guard proxy.shouldHandle(path: request.uri.path) else {
             return next.respond(to: request)
         }

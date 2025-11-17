@@ -9,6 +9,7 @@ import Foundation
 import EventKit
 import ArgumentParser
 import AsyncHTTPClient
+import NIOCore
 
 // MARK: - Configuration
 
@@ -185,7 +186,17 @@ func startServer(
 
     var serverNameForProxy: String?
     if enableMCP {
-        let httpClient = HTTPClient(eventLoopGroupProvider: .shared(app.eventLoopGroup))
+        var httpClientConfig = HTTPClient.Configuration()
+        httpClientConfig.timeout = .init(connect: .seconds(5), read: nil)
+        httpClientConfig.connectionPool = .init(
+            idleTimeout: .seconds(30),
+            concurrentHTTP1ConnectionsPerHostSoftLimit: 64
+        )
+
+        let httpClient = HTTPClient(
+            eventLoopGroupProvider: .shared(app.eventLoopGroup),
+            configuration: httpClientConfig
+        )
         mcpHTTPClient = httpClient
         app.lifecycle.register(
             label: "MCPProxyHTTPClient",
@@ -882,15 +893,15 @@ func startServer(
 
         if requireAuth || (token != nil) {
             transport.authorizationHandler = { provided in
-                guard let provided else {
+                guard let normalized = AuthManager.normalizedToken(from: provided) else {
                     return .unauthorized("Authentication required")
                 }
 
                 if let directToken = token, !directToken.isEmpty {
-                    return provided == directToken ? .authorized : .unauthorized("Invalid token")
+                    return normalized == directToken ? .authorized : .unauthorized("Invalid token")
                 }
 
-                return authManager.isValidToken(provided) ? .authorized : .unauthorized("Invalid token")
+                return authManager.isValidToken(normalized) ? .authorized : .unauthorized("Invalid token")
             }
         } else {
             transport.authorizationHandler = { _ in .authorized }

@@ -261,6 +261,8 @@ Actions:
 
 Optional `upcomingWindowDays` (1–30, default 7) controls how “due soon” is calculated for the summary and due-window buckets.
 
+> Pass JSON objects in the `request` parameter just like the other tools (e.g., `{ "request": { "mode": "overview" } }`). Do **not** send a quoted string such as `"{"mode":"overview"}"`.
+
 ```jsonc
 {
   "request": {
