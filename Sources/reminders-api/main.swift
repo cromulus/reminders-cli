@@ -11,6 +11,13 @@ import ArgumentParser
 import AsyncHTTPClient
 import NIOCore
 
+struct HealthResponse: Codable {
+    let status: String
+    let version: String
+    let gitCommit: String?
+    let buildTimestamp: String
+}
+
 // MARK: - Configuration
 
 struct Configuration: ParsableCommand {
@@ -183,6 +190,23 @@ func startServer(
     // Add auth check middleware
     app.middleware.add(AuthCheckMiddleware())
     Logger.shared.debug("Auth check middleware added")
+
+    app.router.get("healthz") { request -> HBResponse in
+        let info = VersionInfo.current
+        let payload = HealthResponse(
+            status: "ok",
+            version: info.version,
+            gitCommit: info.gitCommit,
+            buildTimestamp: info.buildTimestamp
+        )
+        let data = try JSONEncoder().encode(payload)
+        return HBResponse(
+            status: .ok,
+            headers: ["content-type": "application/json"],
+            body: .byteBuffer(ByteBuffer(data: data))
+        )
+    }
+    Logger.shared.info("Registered /healthz endpoint")
 
     var serverNameForProxy: String?
     if enableMCP {

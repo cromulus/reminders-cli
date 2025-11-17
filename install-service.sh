@@ -44,6 +44,8 @@ Options:
   --reuse-token       Reuse the token from an existing LaunchAgent plist (if present).
   --host <value>      Host interface for reminders-api (default: 127.0.0.1).
   --port <value>      Port for reminders-api (default: 8080).
+  --mcp-host <value>  Host interface for reminders-mcp (default: 127.0.0.1).
+  --mcp-port <value>  Port for reminders-mcp (default: 8081).
   -h, --help          Show this help message.
 
 By default a fresh token is generated each run. Supplying --token overrides all other token behavior,
@@ -106,6 +108,8 @@ USER_SUPPLIED_TOKEN=""
 REUSE_TOKEN=false
 SERVICE_HOST="127.0.0.1"
 SERVICE_PORT="8080"
+MCP_HOST="127.0.0.1"
+MCP_PORT="8081"
 
 # Function to find reminders-api binary
 find_reminders_api() {
@@ -128,27 +132,62 @@ find_reminders_api() {
     return 1
 }
 
-# Function to build reminders-api if not found
-build_reminders_api() {
-    print_status "Building reminders-api..."
-    
-    if [[ -f "Package.swift" ]]; then
-        if command_exists swift; then
-            swift build --configuration release
-            if [[ -f ".build/apple/Products/Release/reminders-api" ]]; then
-                echo ".build/apple/Products/Release/reminders-api"
-                return 0
-            fi
-        else
-            print_error "Swift not found. Please install Xcode or Swift toolchain."
+# Function to find reminders-mcp binary
+find_reminders_mcp() {
+    local possible_paths=(
+        "./.build/apple/Products/Release/reminders-mcp"
+        "./.build/debug/reminders-mcp"
+        "./reminders-mcp"
+        "/usr/local/bin/reminders-mcp"
+        "$HOME/.local/bin/reminders-mcp"
+        "$(which reminders-mcp 2>/dev/null)"
+    )
+
+    for path in "${possible_paths[@]}"; do
+        if [[ -f "$path" && -x "$path" ]]; then
+            echo "$path"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# Function to ensure reminders binaries exist (build once if needed)
+ensure_binaries() {
+    local built=false
+
+    if ! REMINDERS_API_PATH=$(find_reminders_api); then
+        built=true
+    fi
+
+    if ! REMINDERS_MCP_PATH=$(find_reminders_mcp); then
+        built=true
+    fi
+
+    if $built; then
+        if [[ ! -f "Package.swift" ]]; then
+            print_error "Package.swift not found. Run this script from the reminders-cli directory."
             exit 1
         fi
-    else
-        print_error "Package.swift not found. Please run this script from the reminders-cli directory."
+        if ! command_exists swift; then
+            print_error "Swift toolchain not found. Install Xcode or Swift."
+            exit 1
+        fi
+        print_status "Building release binaries..."
+        swift build --configuration release
+    fi
+
+    REMINDERS_API_PATH=$(find_reminders_api)
+    REMINDERS_MCP_PATH=$(find_reminders_mcp)
+
+    if [[ -z "$REMINDERS_API_PATH" || -z "$REMINDERS_MCP_PATH" ]]; then
+        print_error "Unable to locate reminders-api and reminders-mcp binaries after build."
         exit 1
     fi
-    
-    return 1
+
+    REMINDERS_API_PATH=$(realpath "$REMINDERS_API_PATH")
+    REMINDERS_MCP_PATH=$(realpath "$REMINDERS_MCP_PATH")
 }
 
 # Main installation function
@@ -160,28 +199,15 @@ main() {
     print_status "Installing for user: $CURRENT_USER"
     print_status "User home directory: $USER_HOME"
     
-    # Find or build reminders-api binary
-    REMINDERS_API_PATH=$(find_reminders_api)
-    if [[ -z "$REMINDERS_API_PATH" ]]; then
-        print_warning "reminders-api binary not found. Building production version..."
-        REMINDERS_API_PATH=$(build_reminders_api)
-        if [[ -z "$REMINDERS_API_PATH" ]]; then
-            print_error "Failed to find or build reminders-api binary."
-            print_error "Please ensure you have built the project or installed reminders-api."
-            exit 1
-        fi
-    else
-        print_success "Found existing reminders-api binary: $REMINDERS_API_PATH"
-    fi
-    
-    # Convert to absolute path
-    REMINDERS_API_PATH=$(realpath "$REMINDERS_API_PATH")
+    ensure_binaries
     print_success "Found reminders-api at: $REMINDERS_API_PATH"
+    print_success "Found reminders-mcp at: $REMINDERS_MCP_PATH"
     
     # Create LaunchAgents directory if it doesn't exist and determine plist path
     LAUNCH_AGENTS_DIR="$USER_HOME/Library/LaunchAgents"
     mkdir -p "$LAUNCH_AGENTS_DIR"
     PLIST_FILE="$LAUNCH_AGENTS_DIR/com.billcromie.reminders-cli.api.plist"
+    MCP_PLIST_FILE="$LAUNCH_AGENTS_DIR/com.billcromie.reminders-cli.mcp.plist"
 
     if $REUSE_TOKEN && [[ ! -f "$PLIST_FILE" ]]; then
         print_warning "--reuse-token was specified but no existing LaunchAgent plist was found; generating a new token."
@@ -211,6 +237,10 @@ main() {
     LOGS_DIR="$USER_HOME/Library/Logs/reminders-api"
     mkdir -p "$LOGS_DIR"
     print_status "Created logs directory: $LOGS_DIR"
+
+    MCP_LOGS_DIR="$USER_HOME/Library/Logs/reminders-mcp"
+    mkdir -p "$MCP_LOGS_DIR"
+    print_status "Created logs directory: $MCP_LOGS_DIR"
     
     # Generate plist content with proper TCC configuration
     cat > "$PLIST_FILE" << EOF
@@ -280,8 +310,64 @@ main() {
 </dict>
 </plist>
 EOF
-
     print_success "Created plist file: $PLIST_FILE"
+
+    cat > "$MCP_PLIST_FILE" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.billcromie.reminders-cli.mcp</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>$REMINDERS_MCP_PATH</string>
+        <string>--transport</string>
+        <string>httpsse</string>
+        <string>--host</string>
+        <string>$MCP_HOST</string>
+        <string>--port</string>
+        <string>$MCP_PORT</string>
+        <string>--token</string>
+        <string>$API_TOKEN</string>
+    </array>
+
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+
+    <key>WorkingDirectory</key>
+    <string>$USER_HOME</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>$USER_HOME</string>
+        <key>USER</key>
+        <string>$CURRENT_USER</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>LANG</key>
+        <string>en_US.UTF-8</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/reminders-mcp.out</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/reminders-mcp.err</string>
+</dict>
+</plist>
+EOF
+
+    print_success "Created plist file: $MCP_PLIST_FILE"
     
     # Handle TCC permissions
     print_status "Setting up TCC permissions..."
@@ -305,6 +391,15 @@ EOF
     else
         print_success "Permission prompt triggered successfully."
     fi
+
+    print_status "Triggering permission prompt for reminders-mcp..."
+    if ! $REMINDERS_MCP_PATH --help >/dev/null 2>&1; then
+        print_warning "Could not trigger permission prompt automatically for reminders-mcp."
+        print_warning "Please run the following command manually and grant permission:"
+        print_warning "$REMINDERS_MCP_PATH --help"
+    else
+        print_success "Permission prompt triggered successfully for reminders-mcp."
+    fi
     
     echo
     read -p "Press Enter after you have granted Reminders access (or if you've already done so)..."
@@ -317,24 +412,34 @@ EOF
     
     # Bootout any existing service
     launchctl bootout "gui/$USER_ID" com.billcromie.reminders-cli.api 2>/dev/null || true
+    launchctl bootout "gui/$USER_ID" com.billcromie.reminders-cli.mcp 2>/dev/null || true
     
     # Bootstrap the service into the GUI session
     launchctl bootstrap "gui/$USER_ID" "$PLIST_FILE"
+    launchctl bootstrap "gui/$USER_ID" "$MCP_PLIST_FILE"
     
     # Enable the service
     launchctl enable "gui/$USER_ID/com.billcromie.reminders-cli.api"
+    launchctl enable "gui/$USER_ID/com.billcromie.reminders-cli.mcp"
     
     # Kickstart the service
     launchctl kickstart -kp "gui/$USER_ID/com.billcromie.reminders-cli.api"
+    launchctl kickstart -kp "gui/$USER_ID/com.billcromie.reminders-cli.mcp"
     
     # Wait a moment for the service to start
     sleep 3
     
     # Check if service is running
     if launchctl print "gui/$USER_ID" | grep -q "com.billcromie.reminders-cli.api"; then
-        print_success "Service loaded successfully into GUI session!"
+        print_success "reminders-api service loaded successfully!"
     else
         print_warning "Service may not have loaded properly. Check logs for details."
+    fi
+
+    if launchctl print "gui/$USER_ID" | grep -q "com.billcromie.reminders-cli.mcp"; then
+        print_success "reminders-mcp service loaded successfully!"
+    else
+        print_warning "reminders-mcp service may not have loaded properly. Check logs for details."
     fi
     
     # Display important information
@@ -342,20 +447,27 @@ EOF
     print_success "Installation completed!"
     echo
     echo "Service Details:"
-    echo "  - Service Name: com.billcromie.reminders-cli.api"
-    echo "  - API Endpoint: http://$SERVICE_HOST:$SERVICE_PORT"
-    echo "  - API Token: $API_TOKEN"
-    echo "  - Logs Directory: $LOGS_DIR"
+    echo "  - REST Service Name: com.billcromie.reminders-cli.api"
+    echo "    * Endpoint: http://$SERVICE_HOST:$SERVICE_PORT"
+    echo "    * Logs: $LOGS_DIR"
+    echo "  - MCP Service Name: com.billcromie.reminders-cli.mcp"
+    echo "    * Endpoint: http://$MCP_HOST:$MCP_PORT/mcp"
+    echo "    * Logs: $MCP_LOGS_DIR"
+    echo "  - Shared API Token: $API_TOKEN"
     echo
     echo "Management Commands:"
-    echo "  - Check status: launchctl print gui/\$(id -u) | grep reminders"
-    echo "  - View logs: tail -f /tmp/reminders-api.out /tmp/reminders-api.err"
-    echo "  - Stop service: launchctl bootout gui/\$(id -u) com.billcromie.reminders-cli.api"
-    echo "  - Start service: launchctl kickstart -kp gui/\$(id -u)/com.billcromie.reminders-cli.api"
-    echo "  - Restart service: launchctl bootout gui/\$(id -u) com.billcromie.reminders-cli.api && launchctl bootstrap gui/\$(id -u) $PLIST_FILE"
+    echo "  - Check status: launchctl print gui/\$(id -u) | grep reminders-cli"
+    echo "  - View REST logs: tail -f /tmp/reminders-api.out /tmp/reminders-api.err"
+    echo "  - View MCP logs: tail -f /tmp/reminders-mcp.out /tmp/reminders-mcp.err"
+    echo "  - Stop REST: launchctl bootout gui/\$(id -u) com.billcromie.reminders-cli.api"
+    echo "  - Stop MCP: launchctl bootout gui/\$(id -u) com.billcromie.reminders-cli.mcp"
+    echo "  - Start REST: launchctl kickstart -kp gui/\$(id -u)/com.billcromie.reminders-cli.api"
+    echo "  - Start MCP: launchctl kickstart -kp gui/\$(id -u)/com.billcromie.reminders-cli.mcp"
     echo
     echo "Test the API:"
     echo "  curl -H \"Authorization: Bearer $API_TOKEN\" http://$SERVICE_HOST:$SERVICE_PORT/lists"
+    echo "MCP Inspector:"
+    echo "  Use http://$MCP_HOST:$MCP_PORT/mcp with Streamable HTTP and token $API_TOKEN"
     echo
     print_warning "IMPORTANT: You may need to grant Reminders access when the service first starts."
     print_warning "Check the logs if you encounter permission issues."
@@ -397,6 +509,28 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             SERVICE_PORT="$1"
+            ;;
+        --mcp-host)
+            shift
+            if [[ -z "$1" ]]; then
+                print_error "--mcp-host requires a value"
+                usage
+                exit 1
+            fi
+            MCP_HOST="$1"
+            ;;
+        --mcp-port)
+            shift
+            if [[ -z "$1" ]]; then
+                print_error "--mcp-port requires a value"
+                usage
+                exit 1
+            fi
+            if [[ ! "$1" =~ ^[0-9]+$ ]]; then
+                print_error "--mcp-port must be numeric"
+                exit 1
+            fi
+            MCP_PORT="$1"
             ;;
         -h|--help)
             usage

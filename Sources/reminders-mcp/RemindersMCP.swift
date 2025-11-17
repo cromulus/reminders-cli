@@ -3,7 +3,6 @@ import Foundation
 import RemindersLibrary
 import RemindersMCPKit
 import SwiftMCP
-import Logging
 
 @main
 struct RemindersMCP: AsyncParsableCommand {
@@ -71,13 +70,10 @@ struct RemindersMCP: AsyncParsableCommand {
 
         case .httpsse:
             log("Starting MCP server with HTTP+SSE transport on \(hostname):\(port)...")
-            // Keep the backend transport loopback-only and front it with a proxy that
-            // strips MCP-Protocol negotiation headers for legacy SSE clients.
-            let backendHost = "127.0.0.1"
-            let backendTransport = HTTPSSETransport(server: server, host: backendHost, port: 0)
+            let transport = HTTPSSETransport(server: server, host: hostname, port: port)
 
             if let token = token {
-                backendTransport.authorizationHandler = { providedToken in
+                transport.authorizationHandler = { providedToken in
                     guard let providedToken, providedToken == token else {
                         return .unauthorized("Invalid token")
                     }
@@ -86,34 +82,7 @@ struct RemindersMCP: AsyncParsableCommand {
                 log("Bearer token authentication enabled")
             }
 
-            try await backendTransport.start()
-            let backendPort = backendTransport.port
-            log("Internal SwiftMCP transport bound on \(backendHost):\(backendPort)")
-
-            var proxyLogger = Logger(label: "com.reminders.mcp.proxy")
-            proxyLogger.logLevel = verbose ? .debug : .info
-
-            let proxyServer = MCPProxyServer(
-                listenHost: hostname,
-                listenPort: port,
-                backendBaseURL: "http://\(backendHost):\(backendPort)",
-                backendHostHeader: "\(backendHost):\(backendPort)",
-                logger: proxyLogger
-            )
-
-            do {
-                try proxyServer.start()
-                let externalPort = proxyServer.listeningPort ?? port
-                log("Client-facing MCP endpoint ready at http://\(hostname):\(externalPort)/mcp")
-                proxyServer.wait()
-            } catch {
-                await proxyServer.shutdown()
-                try? await backendTransport.stop()
-                throw error
-            }
-
-            await proxyServer.shutdown()
-            try await backendTransport.stop()
+            try await transport.run()
         }
     }
 }
