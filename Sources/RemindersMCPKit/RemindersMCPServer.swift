@@ -621,6 +621,126 @@ public class RemindersMCPServer {
         MCPDocs.filterDetails
     }
 
+    // MARK: - Prompt Templates
+
+    @MCPPrompt(description: "Template instructions for crafting reminders_manage JSON requests.")
+    func remindersManagePrompt() -> [PromptMessage] {
+        promptTemplate("""
+reminders_manage request template.
+Always respond with JSON shaped as:
+{
+  "request": {
+    "action": "<create|read|update|delete|complete|uncomplete|move|archive>",
+    "<actionPayload>": { ... }
+  }
+}
+
+Guidance:
+- For create, include title plus optional list, notes, dueDate, priority, recurrence, tags, and location.
+- For read/delete/complete/uncomplete, payload is { "uuid": "<reminder UUID>" }.
+- For update, only include the fields that change (title, notes, dueDate, priority, isCompleted, recurrence, location).
+- For move, payload is { "uuid": "<uuid>", "targetList": "<list name or identifier>" }.
+- For archive, payload is { "uuid": "<uuid>", "archiveList?": "<name>", "createIfMissing?": true }.
+- Titles may still embed hints (@List, ^priority, #tags, ~recurrence) but structured fields are preferred.
+- Never wrap the request object in a quoted string; return a JSON object.
+""")
+    }
+
+    @MCPPrompt(description: "Template instructions for reminders_bulk dry-run and mutation payloads.")
+    func remindersBulkPrompt() -> [PromptMessage] {
+        promptTemplate("""
+reminders_bulk request template for applying one mutation to many reminders.
+Structure:
+{
+  "request": {
+    "action": "<complete|uncomplete|delete|move|archive|update>",
+    "uuids": ["UUID-ONE","UUID-TWO"],
+    "fields": { ... optional ... },
+    "dryRun": true|false
+  }
+}
+
+Notes:
+- Always supply at least one UUID.
+- Set dryRun true to preview without saving.
+- For update, allowed fields: title, notes, dueDate, priority, isCompleted.
+- For move, set fields.targetList (and optionally fields.createArchiveIfMissing when moving into Archive).
+- For archive, set fields.archiveList and fields.createArchiveIfMissing.
+- Delete/complete/uncomplete only need uuids (plus optional dryRun).
+- Responses echo processedCount, failedCount, per-item messages, and change records.
+""")
+    }
+
+    @MCPPrompt(description: "Template instructions for reminders_search logic/filter payloads.")
+    func remindersSearchPrompt() -> [PromptMessage] {
+        promptTemplate("""
+reminders_search request template.
+Preferred structured approach:
+{
+  "request": {
+    "logic": {
+      "all": [
+        { "clause": { "field": "priority", "op": "in", "value": ["high","medium"] } },
+        { "clause": { "field": "dueDate", "op": "lessOrEqual", "value": "end of week" } }
+      ],
+      "any": [
+        { "clause": { "field": "list", "op": "equals", "value": "Work" } },
+        { "clause": { "field": "list", "op": "equals", "value": "Personal" } }
+      ]
+    },
+    "includeCompleted": false,
+    "groupBy": [{ "field": "list" }, { "field": "priority" }],
+    "sort": [{ "field": "dueDate", "direction": "asc" }],
+    "pagination": { "limit": 25, "offset": 0 }
+  }
+}
+
+Tips:
+- Use natural dates (`today`, `end of week`, `overdue`) for dueDate comparisons.
+- `groupBy` builds histograms (list, priority, tag, dueWindow, recurrence).
+- `filter` strings are available (`priority = 'high' AND overdue`) but nested logic should use the JSON tree (parentheses are not supported yet).
+- `pagination.limit` and `pagination.offset` keep responses bounded.
+""")
+    }
+
+    @MCPPrompt(description: "Template instructions for reminders_lists payloads.")
+    func remindersListsPrompt() -> [PromptMessage] {
+        promptTemplate("""
+reminders_lists request template.
+{
+  "request": {
+    "action": "<list|create|delete|ensureArchive>",
+    "<actionPayload>": { ... }
+  }
+}
+
+Usage:
+- list -> payload { "includeReadOnly": false } to fetch writable calendars (set true to include read-only).
+- create -> payload { "name": "<list name>", "source?": "<iCloud|On My Mac>" }.
+- delete -> payload { "identifier": "<list name or UUID>" }.
+- ensureArchive -> payload { "name?": "Archive", "createIfMissing?": true, "source?": "iCloud" }.
+Always return a JSON object, not a string.
+""")
+    }
+
+    @MCPPrompt(description: "Template instructions for reminders_analyze dashboard payloads.")
+    func remindersAnalyzePrompt() -> [PromptMessage] {
+        promptTemplate("""
+reminders_analyze request template.
+{
+  "request": {
+    "mode": "<overview|lists|priority|dueWindows|recurrence>",
+    "upcomingWindowDays": 7
+  }
+}
+
+Guidance:
+- Omit mode to get the default overview summary.
+- upcomingWindowDays can be any integer 1–30 and controls how “due soon” is computed.
+- Use mode=lists for per-list totals, mode=priority for histogram data, mode=dueWindows for overdue/today/soon buckets, and mode=recurrence for repeating vs one-off stats.
+""")
+    }
+
     // MARK: - Manage Action Helpers
 
     private func handleManageCreate(_ payload: ManageCreatePayload) throws -> ManageResponse {
@@ -2293,10 +2413,14 @@ public class RemindersMCPServer {
         }
     }
 
-private func log(_ message: String) {
-    guard verbose else { return }
-    fputs("[RemindersMCPServer] \(message)\n", stderr)
-}
+    private func promptTemplate(_ text: String) -> [PromptMessage] {
+        [PromptMessage(role: .assistant, content: .init(text: text))]
+    }
+
+    private func log(_ message: String) {
+        guard verbose else { return }
+        fputs("[RemindersMCPServer] \(message)\n", stderr)
+    }
 }
 
 private extension RecurrenceFrequency {
